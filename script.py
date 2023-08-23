@@ -5,7 +5,7 @@ import shutil
 raiz = os.chdir('.')
 lista_raiz = os.listdir(raiz)
 for tabela in lista_raiz:
-    if tabela == 'script.py':
+    if tabela == 'script.py' or tabela == '.git':
         continue
     
     # verifica se a pasta já existe, se nao existir cria uma pasta e acessa ela
@@ -45,4 +45,5 @@ for tabela in lista_raiz:
             cria_view_php.close()
 
             os.chdir('..')
-        os.chdir('..')
+    os.remove(tabela)
+    os.chdir('..')
