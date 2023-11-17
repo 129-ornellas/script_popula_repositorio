@@ -25,6 +25,7 @@ for tabela in lista_raiz:
                 continue
 
             relatorio = f"{linha[0]} - {linha[1]}"
+            relatorio_formatado = "" .join(filter(str.isalnum, relatorio)) 
             
             
             # if(not os.path.exists(relatorio)):
@@ -32,13 +33,8 @@ for tabela in lista_raiz:
             
             # cria paste e acessa
 
-            os.mkdir(relatorio)
-            os.chdir(relatorio)
-
-            # texto_index = linha[4]
-            # cria_index = open('Relatorio.index.php', 'w')
-            # cria_index.write(texto_index)
-            # cria_index.close()
+            os.mkdir(relatorio_formatado)
+            os.chdir(relatorio_formatado)
 
             texto_config = linha[2]
             cria_config_php = open("Relatorio.php", 'w')
