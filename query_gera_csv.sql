@@ -8,4 +8,4 @@ FROM
 INNER JOIN rgo_agrupamentos agrup
 	on (agrup.cd_agrupamento = rel.cd_agrupamento)
 WHERE
-	me_relatorio_index IS NOT NULL and me_relatorio_index != ''
+	me_relatorio_index IS NOT NULL and me_relatorio_index != '' and sn_ativo = 1
