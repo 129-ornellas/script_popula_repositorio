@@ -9,7 +9,7 @@ for tabela in lista_raiz:
         continue
     
     # verifica se a pasta já existe, se nao existir cria uma pasta e acessa ela
-    novo_path = f"custom_{tabela}"
+    novo_path = f"{tabela}"
     if(not os.path.exists(novo_path)):
         os.mkdir(novo_path)
         shutil.copy(tabela, novo_path)
