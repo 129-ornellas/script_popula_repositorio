@@ -7,7 +7,7 @@ SELECT
 	rel.me_relatorio_index,
 	rel.ds_filtro,-- 	inser do relatorio sem os campos acima:
 	CONCAT(
-		'INSERT IGNORE INTO rgo_relatorios (
+		"INSERT IGNORE INTO rgo_relatorios (
         cd_relatorio,
         cd_tipo,
         cd_agrupamento,
@@ -30,29 +30,27 @@ SELECT
     )
 VALUES (
 				NULL,
-        ', rel.cd_tipo,',
-        ', rel.cd_agrupamento,',
-        ', rel.sn_ativo,',
-        ', rel.nm_relatorio,',
-        ', rel.sn_padrao,',
-				NULL,
-				NULL,
-				NULL,
-				NULL,
-				NULL,
-				NULL,
-        NULL,
-        NULL,
-        NULL,
-        ', rel.ds_chave,',
-        ', rel.dt_base,',
-        ', rel.sn_autentique,',
-        NULL'
+        ",IFNULL(rel.cd_tipo, ' NULL') ,','
+        ,IFNULL(rel.cd_agrupamento, ' NULL'),','
+        ,IFNULL(rel.sn_ativo, ' NULL'),','
+        ,IFNULL(rel.nm_relatorio, ' NULL'),','
+        ,IFNULL(rel.sn_padrao, ' NULL'),',',"
+				 NULL,
+				 NULL,
+				 NULL,
+				 NULL,
+				 NULL,
+				"
+				, IFNULL(rel.cd_relatorio_template, ' NULL'),','
+        , IFNULL(rel.cd_formato, ' NULL'), ','
+        , IFNULL(rel.me_documentacao_padrao, ' NULL'), ','
+        , IFNULL(rel.me_documentacao_cliente, ' NULL'),','
+        , IFNULL(rel.ds_chave, ' NULL'),','
+        , IFNULL(rel.dt_base, ' NULL'), ','
+        , IFNULL(rel.sn_autentique, ' NULL'),','
+        , IFNULL(rel.ds_autentique_config, ' NULL')
 				
 -- 				FALTA TRATAR CASO UM DOS CAMPOS FOR NULO
-        
-				
-       
         
 	) AS insert_statement 
 FROM
