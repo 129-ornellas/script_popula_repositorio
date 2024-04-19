@@ -50,14 +50,14 @@ for tabela in lista_raiz:
 
             escrever = "w"
 
+            titulos = ['Relatorio.php', 'Relatorio.view.php', 'index.php', 'ds_filtro.json', ]
+
             def cria_documento(titulo, escrever, texto):
-                documento = open(titulo, escrever)
-                documento.write(texto)
-                documento.close()
+                with open(titulo, escrever, encoding='utf-8') as documento:
+                    documento.write(texto)
+                    documento.close()
                 
             texto_config = linha[2]
-            # depois, alterar o alias das colunas na query para gerar uma lista e nomear os arquivos de acordo com os itens na lista, dessa forma
-            # é possível fazer apenas um for chamando a função e essa lista para nomear os itens.
 
             cria_documento("Relatorio.php",escrever , texto_config)
             break
