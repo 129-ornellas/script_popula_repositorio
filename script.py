@@ -35,54 +35,25 @@ for tabela in lista_raiz:
                 criar_pasta_navegar(agrupamento)
             
             relatorio = f"{linha[1]}"
-            relatorio_formatado = "" .join(filter(str.isalnum, relatorio))
-
-
-
-            # relatorio = f"{[0]} - {[1]}
             # relatorio_formatado = "" .join(filter(str.isalnum, relatorio))
             
             if(not os.path.exists(relatorio)):
-                criar_pasta_navegar(relatorio_formatado)
+                criar_pasta_navegar(relatorio)
             
-            # cria paste e acessa
-
-
             escrever = "w"
 
-            titulos = ['Relatorio.php', 'Relatorio.view.php', 'index.php', 'ds_filtro.json', ]
+            titulos = ['Relatorio.php', 'Relatorio.view.php', 'index.php', 'ds_filtro.json', 'opcao_tipo_impressao.sql', 'insert_statement.sql', 'opcoes_impressao.sql', 'me_config.json']
 
             def cria_documento(titulo, escrever, texto):
                 with open(titulo, escrever, encoding='utf-8') as documento:
                     documento.write(texto)
                     documento.close()
                 
-            texto_config = linha[2]
-
-            cria_documento("Relatorio.php",escrever , texto_config)
-            break
-            
-            texto_view = linha[3]
-            texto_index = linha[4]
-            texto_filtro = linha[5]
-            
-            cria_config_php = open("Relatorio.php", 'w')
-            cria_config_php.write(texto_config)
-            cria_config_php.close()
-
-            cria_view_php = open('Relatorio.view.php', 'w')
-            cria_view_php.write(texto_view)
-            cria_view_php.close()
-
-            cria_view_php = open('Relatorio.view.php', 'w')
-            cria_view_php.write(texto_index)
-            cria_view_php.close()
-
-            cria_view_php = open('Relatorio.view.php', 'w')
-            cria_view_php.write(texto_view)
-            cria_view_php.close()
-
+            indices_desconsiderados = [0, 1, 6]
+            for index, coluna in enumerate(linha):
+                if index not in indices_desconsiderados:
+                    cria_documento(titulos[0], escrever, coluna)
+                    titulos.remove(titulos[0])
+                else:
+                    continue
             os.chdir('..')
-    os.remove(tabela)
-    os.chdir('..')
-    break
