@@ -11,7 +11,7 @@ SELECT
 	rel.cd_relatorio,
 	(
 		SELECT 
-		 GROUP_CONCAT( distinct "INSERT INTO rgo_opcoes_tipos (
+		 GROUP_CONCAT( distinct "INSERT IGNORE INTO rgo_opcoes_tipos (
 								cd_opcao_tipo,
 								ds_opcao_tipo,
 								ds_tag_opcao,
