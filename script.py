@@ -1,26 +1,26 @@
 import os
 import csv
 import shutil
+import re
 
 raiz = os.chdir('.')
 lista_raiz = os.listdir(raiz)
 for tabela in lista_raiz:
     if tabela == 'script.py' or tabela == '.git' or tabela == 'NOVA_QUERY.sql':
         continue
-    
-        
-
-    # verifica se a pasta já existe, se nao existir cria uma pasta e acessa ela
     novo_path = tabela.replace('.csv', '')
     if( not os.path.exists(novo_path)):
         os.mkdir(novo_path)
         shutil.copy(tabela, novo_path)
         os.chdir(novo_path)
 
-    # le o csv que foi copiado para a pasta e cria os diretórios com os arquivos.php de acordo com os campos do csv
     arquivo_csv = tabela
     with open(arquivo_csv, "r", encoding="utf8") as arquivo:
         arquivo_csv = csv.reader(arquivo, delimiter=",")
+
+        def substituir_caracteres_especiais(caminho):
+            return re.sub(r'[<>:"/\\|?*]', '_', caminho)
+
         def criar_pasta_navegar(nome):
             os.mkdir(nome)
             os.chdir(nome)
@@ -29,12 +29,14 @@ for tabela in lista_raiz:
             if i == 0:
                 continue
 
-            agrupamento = f"{linha[0]}"
+            agrupamento = substituir_caracteres_especiais(f"{linha[0]}")
 
-            if(not os.path.exists(agrupamento)):
+            if not os.path.exists(agrupamento):
                 criar_pasta_navegar(agrupamento)
+            else:
+                os.chdir(agrupamento)
             
-            relatorio = f"{linha[1]}"
+            relatorio = substituir_caracteres_especiais(f"{linha[1]}")
             # relatorio_formatado = "" .join(filter(str.isalnum, relatorio))
             
             if(not os.path.exists(relatorio)):
@@ -56,4 +58,4 @@ for tabela in lista_raiz:
                     titulos.remove(titulos[0])
                 else:
                     continue
-            os.chdir('..')
+            os.chdir('../..')
