@@ -54,6 +54,8 @@ for tabela in lista_raiz:
             indices_desconsiderados = [0, 1, 6]
             for index, coluna in enumerate(linha):
                 if index not in indices_desconsiderados:
+                    if coluna == '':
+                        continue
                     cria_documento(titulos[0], escrever, coluna)
                     titulos.remove(titulos[0])
                 else:
