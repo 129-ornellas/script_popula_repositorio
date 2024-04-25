@@ -59,3 +59,4 @@ for tabela in lista_raiz:
                 else:
                     continue
             os.chdir('../..')
+    os.chdir('..')
