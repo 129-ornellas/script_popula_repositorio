@@ -1,0 +1,676 @@
+ds_agrupamento,nm_relatorio,me_relatorio_config,me_relatorio_view,me_relatorio_index,ds_filtro,cd_relatorio,opcao_tipo_impressao,insert_statement,opcoes_impressao,me_config,LENGHT_opcoes_impressao,cd_unicontrole,nome,apelido,nome_tratado
+Acadêmico,EAD - Relatório de Turmas vinculadas com Disciplinas,"<?php
+
+   $PARMS = array('PASTA' => join(DIRECTORY_SEPARATOR, array('..', '..', '..', '')), 'SEGURO' => false, 'NO-SESSION' => true);
+   require_once( $PARMS['PASTA'] . 'nucleo.php' );
+   require_once join(DIRECTORY_SEPARATOR, array('..', '..', '..', 'vendor', 'koolreport', 'core',  'autoload.php'));
+   header ('Content-type: text/html; charset=UTF-8');
+
+   use \koolreport\processes\ColumnMeta;
+
+   // classe padrao do relatorio
+   class Relatorio extends \koolreport\KoolReport {
+      use \koolreport\bootstrap4\Theme;
+      use \koolreport\inputs\Bindable;
+      use \koolreport\inputs\POSTBinding;
+      use \koolreport\export\Exportable;
+      use \koolreport\excel\ExcelExportable;
+
+      public $path_include;
+      public $arrDadosFiltro;
+      public $arrDadosGerais;
+
+      public function __construct() {
+
+         try {
+
+            $this->path_include = join(DIRECTORY_SEPARATOR, array('..', '..', '..', 'projetos', 'relatorios', ''));
+            parent::__construct();
+
+         } catch (Exception $e) {
+
+            echo 'Exceção capturada: ',  $e->getMessage(), ""\n"";
+            die;
+
+         }
+
+      }
+
+      // inicializacao dos filtros
+      function defaultParamValues() {
+         return array(
+            ""filtros""=>'{}',
+            ""gerais""=>'{}'
+         );
+      }
+
+      // resgate do $_POST para vinculo com os parametros
+      function bindParamsToInputs() {
+         return array(
+            ""filtros"",
+            ""gerais""
+         );
+      }
+
+      // funcao responsavel por realizar a conexao com o banco de dados
+      // e resgate dos dados tratamento dos dados do $_POST
+      public function settings() {
+
+         Nucleo::import( 'relatorios.RelatoriosConexao' );
+         $objRelatoriosConexao = new RelatoriosConexao;
+
+         return $objRelatoriosConexao->settings();
+
+      }
+
+      // funcao responsavel por manter as consultas a serem executadas pelo relatorio
+      // e geracao dos array de dados para uso posterior na visualizacao
+      public function setup() {
+
+         require_once $this->path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'formatos.php'));
+
+         if (ctype_xdigit($_POST[""filtros""])) {
+            $_POST[""filtros""] = hex2bin($_POST[""filtros""]);
+         }
+
+         if (ctype_xdigit($_POST[""gerais""])) {
+            $_POST[""gerais""] = hex2bin($_POST[""gerais""]);
+         }
+
+         if (isset($_POST['filtros'])) {
+            $this->arrDadosFiltro = json_decode($_POST['filtros']);
+         } else {
+            $this->arrDadosFiltro = json_decode($_POST);
+         }
+
+         if (isset($_POST['gerais'])) {
+            $this->arrDadosGerais = json_decode($_POST['gerais']);
+         }
+
+         $arrParametros = [];
+
+         foreach ($this->arrDadosFiltro as $filtro => $valor) {
+            if (!empty($valor->ds_valor)) {
+                $arrParametros["":"" . $filtro] = $valor->ds_valor;
+            }
+         }
+
+         $this->src('unimestre')->query(
+            ""
+            SELECT
+                     t.anosemestre 'Anosemestre'
+                     ,t.curso 'Curso' 
+                     ,t.codigo 'Turma'
+                     ,t.descricao 'Nome Turma'
+                     ,d.codigo 'Disciplina'
+                     ,d.descricao 'Nome Disciplina'
+                     ,c.nm_coligada 'Unidade' 
+                  FROM
+                     disciplinas d
+                     INNER JOIN cursos_mestre cm ON ( d.curso = cm.cd_curso )
+                     INNER JOIN grades_disciplinas g ON ( g.CD_DISCIPLINA = d.codigo AND g.CD_CURSO = d.curso )
+                     INNER JOIN turmas t ON ( g.cd_curso = t.curso AND t.serie = g.nr_serie AND t.cd_grade = g.cd_grade )
+                     INNER JOIN coligadas c ON ( t.cd_coligada = c.cd_coligada )
+                     INNER JOIN disciplinas_mestre dm ON ( d.cd_disciplina_pai = dm.cd_disciplina_pai )
+                     INNER JOIN cursos_coligadas cc ON ( cm.cd_curso = cc.cd_curso AND c.cd_coligada = cc.cd_coligada )
+                     INNER JOIN departamentos dept ON ( cc.cd_depto = dept.codigo )
+                  WHERE                   
+              1=1
+                     AND t.cd_coligada <> 1
+
+
+                     "" .
+                         ((!empty($arrParametros["":nr_anosemestre""]))
+                              ? ""AND t.anosemestre IN (:nr_anosemestre)""
+                              : NULL
+                         )
+                     . ""                     
+                     "" .
+                         ((!empty($arrParametros["":cd_disciplina""]))
+                              ? ""AND (dm.cd_disciplina_pai IN (:cd_disciplina) OR d.id_disciplina IN (:cd_disciplina))""
+                              : NULL
+                         )
+                     . ""
+                     "" .
+                 ((!empty($arrParametros["":cd_coligada""]))
+                    ? ""AND c.cd_coligada IN (:cd_coligada)""
+                    : NULL
+                 )
+
+                      . ""
+               ORDER BY 
+                  t.codigo
+            ""
+
+             . ""
+            
+
+            ""//Fecha SELECT
+         )//Fecha query
+
+         // aplicacao de filtro a consulta
+         ->params(
+            $arrParametros
+         )
+         // tratamento dos dados do array, sendo feita a aplicacao de mascaras aos dados
+         // para simplificar e melhorar a apresentacao dos dados na visualizacao
+         ->pipe
+(            new ColumnMeta(
+               array(
+                  ""Anosemestre"" => $arrFormatoInteiro,
+                           ""Disciplina"" => $arrFormatoInteiro
+               )
+            )
+         )
+         ->saveTo($consulta);
+// dump($consulta); 
+// die();
+         $consulta->pipe($this->dataStore(""dados_consulta""));
+         
+      }
+
+   }
+
+ 
+","<?php
+
+   use \koolreport\datagrid\DataTables;
+
+   // Valores fixos
+   $path_include = join(DIRECTORY_SEPARATOR, array('..', '..', '..', 'projetos', 'relatorios', ''));
+
+?>
+
+<html>
+   <head>
+      <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'dados_head.php')); ?>
+   </head>
+
+   <body class=""listagem"">
+      <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'loader.php')); ?>
+      <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'barra_superior.php')); ?>
+      <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'css.php')); ?>
+
+      <div class=""container-fluid"">
+         <div style=""width:100%"">
+
+            <div style=""padding-left: 15px;padding-right: 15px;"">
+               <?php require_once $path_include . 'imports_padroes/filtro.php'; ?>
+            </div>
+
+            <h3 class=""text-center"" style=""margin: 2rem;""><?=$this->arrDadosGerais->nm_relatorio?></h3>
+
+            <?php
+
+               // componente responsavel pela criacao da tabela do relatorio de listagem
+               DataTables::create(array(
+                  ""language""=>""pt"",
+                  ""name""=> ""tbl_relatorio"",
+                  ""dataSource""=> $this->dataStore(""dados_consulta""),
+                  ""columns""=> json_decode($this->arrDadosGerais->arrOpcoes->layout_impressao->me_configuracao)[0]->campos_disponiveis,
+                  ""options""=> array(
+                     ""searching""=> true,
+                     ""paging""=> true,
+                     ""colReorder""=> true,
+                     ""order""=>array(
+                        array(1,""asc""),
+                        array(2,""asc"")
+                     ),
+                  ),
+                  ""cssClass""=>array(
+                     ""table""=>""table table-sm table-complete table-striped table-hover"",
+                     ""tr""=>"""",
+                     ""th""=>"""",
+                     ""td""=>"""",
+                     ""tf""=>"""",
+                  )
+               ));
+
+            ?>
+         </div>
+      </div>
+
+   </body>
+</html>
+","<?php
+
+require_once ""Relatorio.php"";
+
+$relatorio = new Relatorio;
+
+$relatorio->run()->render();","[
+	{
+		""tipo"": ""uni-select-coligada-filha"",
+		""obrigatorio"": false,
+		""label"": ""Unidade"",
+		""ds_campo"": ""cd_coligada""
+	},
+	{
+		""tipo"": ""campo-anosemestre"",
+		""obrigatorio"": true,
+		""label"": ""Anosemestre"",
+		""ds_campo"": ""nr_anosemestre""
+	},
+	{
+		""tipo"": ""uni-busca-disciplina"",
+		""obrigatorio"": false,
+		""label"": ""Disciplina"",
+		""ds_chave"": ""busca-codigo-disciplina"",
+		""ds_campo"": ""cd_disciplina""
+	}
+]",22,,"INSERT IGNORE INTO rgo_relatorios (
+		cd_relatorio,
+		cd_tipo,
+		cd_agrupamento,
+		sn_ativo,
+		nm_relatorio,
+		sn_padrao,
+		ds_filtro,
+		nm_arquivo,
+		me_relatorio_index,
+		me_relatorio_config,
+		me_relatorio_view,
+		cd_relatorio_template,
+		cd_formato,
+		me_documentacao_padrao,
+		me_documentacao_cliente,
+		ds_chave,
+		dt_base,
+		sn_autentique,
+		ds_autentique_config
+    )
+		VALUES (
+		NULL,
+		2,4,1,""EAD - Relatório de Turmas vinculadas com Disciplinas"",0,
+		NULL,
+		NULL,
+		NULL,
+		NULL,
+		NULL,
+		 NULL, NULL, NULL, NULL, NULL,""2023-12-13 16:39:50"",0, NULL)",,,,1433,Faculdade Facnopar,"FACNOPAR, Faculdade",Faculdade Facnopar
+Acadêmico,Relatório Dependência e Adaptações,"<?php
+
+   $PARMS = array('PASTA' => join(DIRECTORY_SEPARATOR, array('..', '..', '..', '')), 'SEGURO' => false, 'NO-SESSION' => true);
+   require_once( $PARMS['PASTA'] . 'nucleo.php' );
+   require_once join(DIRECTORY_SEPARATOR, array('..', '..', '..', 'vendor', 'koolreport', 'core',  'autoload.php'));
+   header ('Content-type: text/html; charset=UTF-8');
+
+   use \koolreport\processes\ColumnMeta;
+   use \koolreport\processes\Group;
+   use \koolreport\processes\OnlyColumn;
+
+   // classe padrao do relatorio
+   class Relatorio extends \koolreport\KoolReport {
+      use \koolreport\bootstrap4\Theme;
+      use \koolreport\inputs\Bindable;
+      use \koolreport\inputs\POSTBinding;
+      use \koolreport\export\Exportable;
+
+      public $path_include;
+      public $arrDadosFiltro;
+      public $arrDadosGerais;
+
+      public function __construct() {
+
+         try {
+
+            $this->path_include = join(DIRECTORY_SEPARATOR, array('..', '..', '..', 'projetos', 'relatorios', ''));
+            parent::__construct();
+
+         } catch (Exception $e) {
+
+            echo 'Exceção capturada: ',  $e->getMessage(), ""\n"";
+            die;
+
+         }
+
+      }
+
+      // inicializacao dos filtros
+      function defaultParamValues() {
+         return array(
+            ""filtros""=>'{}',
+            ""gerais""=>'{}'
+         );
+      }
+
+      // resgate do $_POST para vinculo com os parametros
+      function bindParamsToInputs() {
+         return array(
+            ""filtros"",
+            ""gerais""
+         );
+      }
+
+      // funcao responsavel por realizar a conexao com o banco de dados
+      // e resgate dos dados tratamento dos dados do $_POST
+      public function settings() {
+
+         Nucleo::import( 'relatorios.RelatoriosConexao' );
+         $objRelatoriosConexao = new RelatoriosConexao;
+
+         return $objRelatoriosConexao->settings();
+
+      }
+
+      // funcao responsavel por manter as consultas a serem executadas pelo relatorio
+      // e geracao dos array de dados para uso posterior na visualizacao
+      public function setup() {
+
+         require_once $this->path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'formatos.php'));
+
+         if (ctype_xdigit($_POST[""filtros""])) {
+            $_POST[""filtros""] = hex2bin($_POST[""filtros""]);
+         }
+
+         if (ctype_xdigit($_POST[""gerais""])) {
+            $_POST[""gerais""] = hex2bin($_POST[""gerais""]);
+         }
+
+         if (isset($_POST['filtros'])) {
+            $this->arrDadosFiltro = json_decode($_POST['filtros']);
+         } else {
+            $this->arrDadosFiltro = json_decode($_POST);
+         }
+
+         if (isset($_POST['gerais'])) {
+            $this->arrDadosGerais = json_decode($_POST['gerais']);
+         }
+
+         $arrParametros = [];
+
+         foreach ($this->arrDadosFiltro as $filtro => $valor) {
+            if (!empty($valor->ds_valor)) {
+                $arrParametros["":"" . $filtro] = $valor->ds_valor;
+            }
+         }
+
+         $this->src('unimestre')->query(
+            ""
+        SELECT
+            aluno.cd_pessoa,
+            cm.DS_CURSO AS curso,
+            d.descricao AS disciplina,
+            professor.nm_pessoa AS professor,
+            tp.professor AS cd_professor,
+            t.codigo AS turma,
+            aluno.nm_pessoa AS aluno,
+            t.cd_coligada,
+            fi.disciplina AS cd_disciplina,
+            cm.cd_curso
+         FROM
+             fichaindividual AS fi
+         INNER JOIN
+             turmas AS t ON (
+                 fi.anosemestre = t.anosemestre AND
+                 fi.turma = t.codigo AND
+                 fi.curso = t.curso AND
+                 fi.grau = t.grau AND
+                 fi.serie = t.serie
+             )
+         INNER JOIN
+             turmasprofessores AS tp ON (
+                 fi.anosemestre = tp.anosemestre AND
+                 fi.turma = tp.turma AND
+                 fi.curso = tp.curso AND
+                 fi.disciplina = tp.disciplina
+             )
+         INNER JOIN
+             cursos_mestre AS cm ON (t.curso = cm.CD_CURSO)
+         INNER JOIN
+            disciplinas AS d ON (
+               fi.curso = d.curso AND
+               fi.disciplina = d.codigo
+            )
+         INNER JOIN
+             pessoas AS aluno ON (fi.codigoaluno = aluno.cd_pessoa)
+         INNER JOIN
+            pessoas AS professor ON (tp.professor = professor.cd_pessoa)
+         WHERE
+            1=1 AND
+            (fi.sn_possui_adap = 1 OR
+            fi.sn_possui_depen = 1)
+            "" .
+               ((!empty($arrParametros["":nr_anosemestre""]))
+                  ? ""AND t.anosemestre IN (:nr_anosemestre)""
+                  : NULL
+               )
+            . ""
+            "" .
+               ((!empty($arrParametros["":cd_coligada""]))
+                  ? ""AND t.cd_coligada IN (:cd_coligada)""
+                  : NULL
+               )
+            . ""
+            "" .
+            ((!empty($arrParametros["":id_curso""]))
+               ? ""AND cm.id_curso IN (:id_curso)""
+               : NULL
+            )
+            . ""
+            "".
+            ""
+         GROUP BY
+            fi.codigoaluno,
+            fi.disciplina
+            ""
+         )
+         // aplicacao de filtro a consulta
+         ->params(
+            $arrParametros
+         )
+         // tratamento dos dados do array, sendo feita a aplicacao de mascaras aos dados
+         // para simplificar e melhorar a apresentacao dos dados na visualizacao
+         ->pipe(
+            new ColumnMeta(
+               array(
+               )
+            )
+         )
+         ->saveTo($consulta);
+
+         // criacao do primeiro dataStore para uso com o componente de tabela na visualizacao
+         $consulta->pipe($this->dataStore(""dados_consulta""));
+
+         $consulta->pipe(new Group(array(
+            ""by""=>array(
+                ""cd_curso"",
+                ""cd_disciplina"",
+                ""cd_professor""
+            )
+         )))
+         ->pipe(new OnlyColumn(array(
+            ""cd_curso"",
+            ""cd_disciplina"",
+            ""cd_professor""
+         )))
+         ->pipe($this->dataStore(""dados_consulta_agrupado""));
+
+require_once $this->path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'consulta_cabecalho.php'));
+
+      }
+
+   }
+","<?php
+
+   use \koolreport\widgets\koolphp\Table;
+   use \koolreport\processes\Filter;
+
+   // path pasta
+   $path_include = join(DIRECTORY_SEPARATOR, array('..', '..', '..', 'projetos', 'relatorios', ''));
+
+   // margens
+   $ds_margem_superior = $this->arrDadosGerais->arrFormato->ds_margem_superior;
+   $ds_margem_inferior = $this->arrDadosGerais->arrFormato->ds_margem_inferior;
+   $ds_margem_esquerda = $this->arrDadosGerais->arrFormato->ds_margem_esquerda;
+   $ds_margem_direita = $this->arrDadosGerais->arrFormato->ds_margem_direita;
+
+   $sn_geracao = $_POST[""pdf""];
+
+?>
+
+<html>
+   <head>
+      <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'dados_head.php')); ?>
+   </head>
+
+   <body class=""relatorio"">
+      <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'loader.php')); ?>
+      <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'barra_superior.php')); ?>
+      <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'css.php')); ?>
+
+            <?php
+
+                foreach($this->dataStore(""dados_consulta_agrupado"") as $visualizacao)
+                {
+                $dados_pagina = $this->dataStore(""dados_consulta"")
+                    ->filter(
+                        ""cd_curso"",""="",$visualizacao[""cd_curso""]
+                    )
+                    ->filter(
+                    ""cd_disciplina"",""="",$visualizacao[""cd_disciplina""]
+                    )
+                    ->filter(
+                    ""cd_professor"",""="",$visualizacao[""cd_professor""]
+                    );
+
+
+            ?>
+
+            <div class=""container"">
+               <div
+                  class=""conteudo""
+                  style=""
+                     padding-top: <?=((!$sn_geracao) ? $ds_margem_superior : 0) . 'cm'?>;
+                     padding-bottom: <?=((!$sn_geracao) ? $ds_margem_inferior : 0) . 'cm'?>;
+                     padding-left: <?=$ds_margem_esquerda . 'cm'?>;
+                     padding-right: <?=$ds_margem_direita . 'cm'?>;
+                     ""
+               >
+
+               <table style=""width: 100%; margin-bottom: 35px;"">
+                    <tr>
+                        <td style=""width: 60%;"">
+                            <?php require $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'cabecalho.php')); ?>
+                        </td>
+                        <td style=""width: 40%; text-align: right !important;"">
+                            <?php require $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'filtro.php')); ?>
+                        </td>
+                    </tr>
+               </table>
+
+                <div style='text-align: center; margin-bottom: 20px;'><b>RELAÇÃO DE ALUNOS MATRICULADOS EM DEPENDÊNCIA</b></div>
+
+                <?php // TABELA DE DESCONTOS
+
+                    // componente responsavel pela criacao da tabela de dados
+                    Table::create(array(
+                    ""dataSource""=> $dados_pagina,
+                    ""grouping""=> array(
+                        ""curso""=> array(
+                            ""calculate""=>array(
+                                ""{qtd_alunos}""=>array(""count"",""codigoaluno"")
+                            ),
+                            ""top""=>""<td colspan='2' class='align-middle p-2'><b>CURSO: {curso}</b></td>"",
+                            ""bottom""=>""<td colspan='2' class='align-middle p-2'><b>TOTAL ALUNOS: {qtd_alunos}</b></td>""
+                            ),
+                            ""disciplina""=> array(
+                                ""top""=>""<td class='align-middle p-2' colspan='2'><b>DISCIPLINA {disciplina}</b></td>"",
+                                ""bottom""=>""""
+                            ),
+                            ""professor""=> array(
+                                ""top""=>""<td class='align-middle p-2' colspan='2'><b>PROFESSOR: {professor}</b></td>"",
+                                ""bottom""=>""""
+                            )
+                    ),
+                    ""showHeader""=>false,
+                    ""columns""=> array(
+                        ""turma"" => array(
+                            ""cssStyle""=> ""font-size: 11px !important; text-align: center !important;""
+                        ),
+                        ""aluno"" => array(
+                            ""cssStyle""=> ""font-size: 11px !important; text-align: left !important;""
+                        )                 
+                    ),
+                    ""cssClass""=>array(
+                        ""table""=>""table table-striped table-hover"",
+                        ""tr""=>"""",
+                        ""th""=>"""",
+                        ""td""=>""p-2"",
+                        ""tf""=>""darker"",
+                    ),
+                    ""sorting""=> array(
+                        ""aluno""=> ""asc""
+                    )
+                    ));
+
+                ?>
+
+                  <div class=""page-break"" style=""page-break-after: always;""></div>
+
+               </div>
+            </div>
+
+         <?php
+
+         }
+
+      ?>
+
+   </body>
+</html>
+","<?php
+
+require_once ""Relatorio.php"";
+
+$relatorio = new Relatorio;
+
+$relatorio->run()->render();","[
+	{
+		""tipo"": ""uni-select-coligada-filha"",
+		""obrigatorio"": false,
+		""label"": ""Coligada"",
+		""ds_campo"": ""cd_coligada""
+	},
+	{
+		""tipo"": ""campo-anosemestre"",
+		""obrigatorio"": false,
+		""label"": ""Ano Semestre"",
+		""ds_campo"": ""nr_anosemestre""
+	},
+	{
+		""tipo"": ""uni-select-curso"",
+		""obrigatorio"": false,
+		""label"": ""Curso"",
+		""ds_campo"": ""id_curso""
+	}
+]",43,,"INSERT IGNORE INTO rgo_relatorios (
+		cd_relatorio,
+		cd_tipo,
+		cd_agrupamento,
+		sn_ativo,
+		nm_relatorio,
+		sn_padrao,
+		ds_filtro,
+		nm_arquivo,
+		me_relatorio_index,
+		me_relatorio_config,
+		me_relatorio_view,
+		cd_relatorio_template,
+		cd_formato,
+		me_documentacao_padrao,
+		me_documentacao_cliente,
+		ds_chave,
+		dt_base,
+		sn_autentique,
+		ds_autentique_config
+    )
+		VALUES (
+		NULL,
+		3,6,1,""Relatório Dependência e Adaptações"",0,
+		NULL,
+		NULL,
+		NULL,
+		NULL,
+		NULL,
+		 NULL, NULL, NULL, NULL, NULL,""2023-12-13 16:39:50"",0, NULL)",,,,1433,Faculdade Facnopar,"FACNOPAR, Faculdade",Faculdade Facnopar

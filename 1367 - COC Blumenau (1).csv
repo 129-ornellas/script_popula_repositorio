@@ -1,0 +1,806 @@
+ds_agrupamento,nm_relatorio,me_relatorio_config,me_relatorio_view,me_relatorio_index,ds_filtro,cd_relatorio,opcao_tipo_impressao,insert_statement,opcoes_impressao,me_config,LENGHT_opcoes_impressao,cd_unicontrole,nome,apelido,nome_tratado
+Acadêmico,Boletim REDE,"<?php
+$PARMS = array('PASTA' => join(DIRECTORY_SEPARATOR, array('..', '..', '..', '')), 'SEGURO' => false, 'NO-SESSION' => true);
+require_once($PARMS['PASTA'] . 'nucleo.php');
+require_once join(DIRECTORY_SEPARATOR, array('..', '..', '..', 'vendor', 'koolreport', 'core',  'autoload.php'));
+header('Content-type: text/html; charset=UTF-8');
+
+use \koolreport\processes\ColumnMeta;
+use \koolreport\processes\Group;
+use \koolreport\processes\OnlyColumn;
+
+// classe padrao do relatorio
+class Relatorio extends \koolreport\KoolReport
+{
+   use \koolreport\bootstrap4\Theme;
+   use \koolreport\inputs\Bindable;
+   use \koolreport\inputs\POSTBinding;
+   use \koolreport\export\Exportable;
+   use \koolreport\cloudexport\Exportable;
+
+   const C_SN_CLOUD_EXPORT = (PHP_MAJOR_VERSION >= 7);
+
+   public $path_include;
+   public $arrDadosFiltro;
+   public $arrDadosGerais;
+
+   public function __construct()
+   {
+      try {
+         $this->path_include = join(DIRECTORY_SEPARATOR, array('..', '..', '..', 'projetos', 'relatorios', ''));
+         parent::__construct();
+      } catch (Exception $e) {
+         echo 'Exceção capturada: ',  $e->getMessage(), ""\n"";
+         die;
+      }
+   }
+
+   // inicializacao dos filtros
+   function defaultParamValues()
+   {
+      return array(
+         ""filtros"" => '{}',
+         ""gerais"" => '{}'
+      );
+   }
+
+   // resgate do $_POST para vinculo com os parametros
+   function bindParamsToInputs()
+   {
+      return array(
+         ""filtros"",
+         ""gerais""
+      );
+   }
+
+   // funcao responsavel por realizar a conexao com o banco de dados
+   // e resgate dos dados tratamento dos dados do $_POST
+   public function settings()
+   {
+      Nucleo::import('relatorios.RelatoriosConexao');
+      $objRelatoriosConexao = new RelatoriosConexao;
+
+      return $objRelatoriosConexao->settings();
+   }
+
+   // funcao responsavel por manter as consultas a serem executadas pelo relatorio
+   // e geracao dos array de dados para uso posterior na visualizacao
+   public function setup()
+   {
+      require_once $this->path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'formatos.php'));
+
+      if (ctype_xdigit($_POST[""filtros""])) {
+         $_POST[""filtros""] = hex2bin($_POST[""filtros""]);
+      }
+
+      if (ctype_xdigit($_POST[""gerais""])) {
+         $_POST[""gerais""] = hex2bin($_POST[""gerais""]);
+      }
+
+      if (isset($_POST['filtros'])) {
+         $this->arrDadosFiltro = json_decode($_POST['filtros']);
+      } else {
+         $this->arrDadosFiltro = json_decode($_POST);
+      }
+
+      if (isset($_POST['gerais'])) {
+         $this->arrDadosGerais = json_decode($_POST['gerais']);
+      }
+
+      $arrParametros = [];
+
+      foreach ($this->arrDadosFiltro as $filtro => $valor) {
+         if (!empty($valor->ds_valor)) {
+            $arrParametros["":"" . $filtro] = $valor->ds_valor;
+         }
+      }
+
+      $sql = ""
+         SELECT
+            tm.cd_coligada AS cd_coligada_cabecalho
+         ,  p.cd_pessoa AS 'cd_pessoa'
+         ,  p.nm_pessoa AS 'nm_pessoa'
+         ,  m.anosemestre AS 'nr_anosemestre'
+         ,  IF(LENGTH(m.anosemestre) = 5,
+               CONCAT(LEFT(m.anosemestre, 4), '/', RIGHT(m.anosemestre, 1)),
+               m.anosemestre
+            ) AS 'nr_anosemestre_formatado'
+         ,  cm.CD_CURSO AS 'cd_curso'
+         ,  cm.ID_CURSO AS 'id_curso'
+         ,  cm.DS_HABILITACAO AS 'ds_habilitacao'
+         ,  cm.DS_CURSO AS 'ds_curso'
+         ,  d.codigo AS 'cd_disciplina'
+         ,  d.descricao AS 'ds_disciplina'
+         ,  d.ordem AS 'nr_ordem'
+         ,  tm.codigo AS 'cd_turma'
+         ,  COALESCE(tm.obsgerais,'') AS 'ds_obs_turma'
+         ,  tu.descricao AS 'ds_turno'
+         ,	UCASE(IF(dc.ds_categoria LIKE '%nucleo%comu%','núcleo comum','FORMAÇÃO GERAL BÁSICA')) AS 'ds_categoria_disciplina'
+         ,  g.CD_GRADE AS 'cd_grade'
+         ,  g.DS_GRADE AS 'ds_grade'
+         ,  s.ds_situacao AS 'ds_situacao_matricula'
+         ,  COALESCE(FORMAT(f.frequencia,COALESCE(apm.nr_casas_decimais_frequencia,0)), ' ') AS 'vl_frequencia'
+         ,  REPLACE(REPLACE(col.ds_cidade,'BALNEÁRIO CAMBORIÚ','Balneário Camboriú'),'BALNEARIO CAMBORIU','Balneário Camboriú') AS 'ds_cidade_coligada'
+         ,  col.nm_diretor_acad AS 'nm_diretor_acad'
+         ,  col.me_secretaria AS 'me_secretaria'
+         ,  CONCAT(
+               DAY(CURDATE()),
+               ' de ',
+               CASE MONTH(CURDATE())
+                  WHEN 01 THEN 'Janeiro'
+                  WHEN 02 THEN 'Fevereiro'
+                  WHEN 03 THEN 'Março'
+                  WHEN 04 THEN 'Abril'
+                  WHEN 05 THEN 'Maio'
+                  WHEN 06 THEN 'Junho'
+                  WHEN 07 THEN 'Julho'
+                  WHEN 08 THEN 'Agosto'
+                  WHEN 09 THEN 'Setembro'
+                  WHEN 10 THEN 'Outubro'
+                  WHEN 11 THEN 'Novembro'
+                  WHEN 12 THEN 'Dezembro'
+               END,
+               ' de ',
+               YEAR(CURDATE())
+            ) AS dt_atual
+         
+         ,	CASE apm.sn_conceitos_parciais
+               WHEN 'S' THEN COALESCE((SELECT ac.ds_conceito FROM avaliacoes_conceitos ac WHERE ac.cd_avaliacao = tm.cd_avaliacao AND f.nota1 >= ac.nr_inicial AND f.nota1 <= ac.nr_final ),' ')
+               ELSE COALESCE(CONVERT(FORMAT(f.nota1, COALESCE(apm.nr_casas_decimais, 2)) USING LATIN1),' ')
+            END AS 'vl_nota_1'	
+         ,	CASE apm.sn_conceitos_parciais
+               WHEN 'S' THEN COALESCE((SELECT ac.ds_conceito FROM avaliacoes_conceitos ac WHERE ac.cd_avaliacao = tm.cd_avaliacao AND f.exame1 >= ac.nr_inicial AND f.exame1 <= ac.nr_final ),' ')
+               ELSE COALESCE(CONVERT(FORMAT(f.exame1, COALESCE(apm.nr_casas_decimais, 2)) USING LATIN1),' ')
+            END AS 'vl_exame_1'
+         ,	CASE apm.sn_conceitos_parciais
+               WHEN 'S' THEN COALESCE((SELECT ac.ds_conceito FROM avaliacoes_conceitos ac WHERE ac.cd_avaliacao = tm.cd_avaliacao AND f.nota_d1 >= ac.nr_inicial AND f.nota_d1 <= ac.nr_final ),' ')
+               ELSE COALESCE(CONVERT(FORMAT(f.nota_d1, COALESCE(apm.nr_casas_decimais, 2)) USING LATIN1),' ')
+            END AS 'vl_nota_d1'
+         ,  COALESCE(f.falta1, ' ') AS 'nr_falta1'
+         
+         ,	CASE apm.sn_conceitos_parciais
+               WHEN 'S' THEN COALESCE((SELECT ac.ds_conceito FROM avaliacoes_conceitos ac WHERE ac.cd_avaliacao = tm.cd_avaliacao AND f.nota2 >= ac.nr_inicial AND f.nota2 <= ac.nr_final ),' ')
+               ELSE COALESCE(CONVERT(FORMAT(f.nota2, COALESCE(apm.nr_casas_decimais, 2)) USING LATIN1),' ')
+            END AS 'vl_nota_2'	
+         ,	CASE apm.sn_conceitos_parciais
+               WHEN 'S' THEN COALESCE((SELECT ac.ds_conceito FROM avaliacoes_conceitos ac WHERE ac.cd_avaliacao = tm.cd_avaliacao AND f.exame2 >= ac.nr_inicial AND f.exame2 <= ac.nr_final ),' ')
+               ELSE COALESCE(CONVERT(FORMAT(f.exame2, COALESCE(apm.nr_casas_decimais, 2)) USING LATIN1),' ')
+            END AS 'vl_exame_2'
+         ,	CASE apm.sn_conceitos_parciais
+               WHEN 'S' THEN COALESCE((SELECT ac.ds_conceito FROM avaliacoes_conceitos ac WHERE ac.cd_avaliacao = tm.cd_avaliacao AND f.nota_d2 >= ac.nr_inicial AND f.nota_d2 <= ac.nr_final ),' ')
+               ELSE COALESCE(CONVERT(FORMAT(f.nota_d2, COALESCE(apm.nr_casas_decimais, 2)) USING LATIN1),' ')
+            END AS 'vl_nota_d2'
+         ,  COALESCE(f.falta2, ' ') AS 'nr_falta2'
+         
+         ,	CASE apm.sn_conceitos_parciais
+               WHEN 'S' THEN COALESCE((SELECT ac.ds_conceito FROM avaliacoes_conceitos ac WHERE ac.cd_avaliacao = tm.cd_avaliacao AND f.nota3 >= ac.nr_inicial AND f.nota3 <= ac.nr_final ),' ')
+               ELSE COALESCE(CONVERT(FORMAT(f.nota3, COALESCE(apm.nr_casas_decimais, 2)) USING LATIN1),' ')
+            END AS 'vl_nota_3'	
+         ,	CASE apm.sn_conceitos_parciais
+               WHEN 'S' THEN COALESCE((SELECT ac.ds_conceito FROM avaliacoes_conceitos ac WHERE ac.cd_avaliacao = tm.cd_avaliacao AND f.exame3 >= ac.nr_inicial AND f.exame3 <= ac.nr_final ),' ')
+               ELSE COALESCE(CONVERT(FORMAT(f.exame3, COALESCE(apm.nr_casas_decimais, 2)) USING LATIN1),' ')
+            END AS 'vl_exame_3'
+         ,	CASE apm.sn_conceitos_parciais
+               WHEN 'S' THEN COALESCE((SELECT ac.ds_conceito FROM avaliacoes_conceitos ac WHERE ac.cd_avaliacao = tm.cd_avaliacao AND f.nota_d3 >= ac.nr_inicial AND f.nota_d3 <= ac.nr_final ),' ')
+               ELSE COALESCE(CONVERT(FORMAT(f.nota_d3, COALESCE(apm.nr_casas_decimais, 2)) USING LATIN1),' ')
+            END AS 'vl_nota_d3'
+         ,  COALESCE(f.falta3, ' ') AS 'nr_falta3'
+         
+         ,	CASE apm.sn_conceitos_parciais
+               WHEN 'S' THEN COALESCE((SELECT ac.ds_conceito FROM avaliacoes_conceitos ac WHERE ac.cd_avaliacao = tm.cd_avaliacao AND f.nota4 >= ac.nr_inicial AND f.nota4 <= ac.nr_final ),' ')
+               ELSE COALESCE(CONVERT(FORMAT(f.nota4, COALESCE(apm.nr_casas_decimais, 2)) USING LATIN1),' ')
+            END AS 'vl_nota_4'	
+         ,	CASE apm.sn_conceitos_parciais
+               WHEN 'S' THEN COALESCE((SELECT ac.ds_conceito FROM avaliacoes_conceitos ac WHERE ac.cd_avaliacao = tm.cd_avaliacao AND f.exame4 >= ac.nr_inicial AND f.exame4 <= ac.nr_final ),' ')
+               ELSE COALESCE(CONVERT(FORMAT(f.exame4, COALESCE(apm.nr_casas_decimais, 2)) USING LATIN1),' ')
+            END AS 'vl_exame_4'
+         ,	CASE apm.sn_conceitos_parciais
+               WHEN 'S' THEN COALESCE((SELECT ac.ds_conceito FROM avaliacoes_conceitos ac WHERE ac.cd_avaliacao = tm.cd_avaliacao AND f.nota_d4 >= ac.nr_inicial AND f.nota_d4 <= ac.nr_final ),' ')
+               ELSE COALESCE(CONVERT(FORMAT(f.nota_d4, COALESCE(apm.nr_casas_decimais, 2)) USING LATIN1),' ')
+            END AS 'vl_nota_d4'
+         ,  COALESCE(f.falta4, ' ') AS 'nr_falta4'
+         
+         ,	CASE apm.sn_conceitos_parciais
+               WHEN 'S' THEN COALESCE((SELECT ac.ds_conceito FROM avaliacoes_conceitos ac WHERE ac.cd_avaliacao = tm.cd_avaliacao AND f.mediaanual >= ac.nr_inicial AND f.mediaanual <= ac.nr_final ),' ')
+               ELSE COALESCE(CONVERT(FORMAT(f.mediaanual, COALESCE(apm.nr_casas_decimais, 2)) USING LATIN1),' ')
+            END AS 'vl_media_anual'
+         ,	CASE apm.sn_conceitos_parciais
+               WHEN 'S' THEN COALESCE((SELECT ac.ds_conceito FROM avaliacoes_conceitos ac WHERE ac.cd_avaliacao = tm.cd_avaliacao AND f.notaexame >= ac.nr_inicial AND f.notaexame <= ac.nr_final ),' ')
+               ELSE COALESCE(CONVERT(FORMAT(f.notaexame, COALESCE(apm.nr_casas_decimais, 2)) USING LATIN1),' ')
+            END AS 'vl_nota_exame'
+         ,	CASE apm.sn_conceitos_parciais
+               WHEN 'S' THEN COALESCE((SELECT ac.ds_conceito FROM avaliacoes_conceitos ac WHERE ac.cd_avaliacao = tm.cd_avaliacao AND f.segunda_epoca >= ac.nr_inicial AND f.segunda_epoca <= ac.nr_final ),' ')
+               ELSE COALESCE(CONVERT(FORMAT(f.segunda_epoca, COALESCE(apm.nr_casas_decimais, 2)) USING LATIN1),' ')
+            END AS 'vl_segunda_epoca'
+         ,	CASE apm.sn_conceitos_parciais
+               WHEN 'S' THEN COALESCE((SELECT ac.ds_conceito FROM avaliacoes_conceitos ac WHERE ac.cd_avaliacao = tm.cd_avaliacao AND f.mediafinal >= ac.nr_inicial AND f.mediafinal <= ac.nr_final ),' ')
+               ELSE COALESCE(CONVERT(FORMAT(f.mediafinal, COALESCE(apm.nr_casas_decimais, 2)) USING LATIN1),' ')
+            END AS 'vl_media_final'
+         
+         ,  COALESCE(f.ds_media, ' ') ds_media
+         
+         ,	COALESCE(
+               (
+                  SELECT
+                     SUM(dai.qtd_aulas)
+                  FROM
+                     diario_aulas dai
+                  WHERE
+                     dai.turma = f.turma AND
+                     dai.anosemestre = f.anosemestre AND
+                     dai.disciplina = f.disciplina
+               )
+            ,' ') AS ds_nr_aulas_dadas
+         
+         ,  COALESCE(f.totalfaltas, 0) AS nr_totalfaltas
+         
+         ,  si.ds_sigla_situacao AS 'ds_sigla_situacao_fichaindividual'
+         ,  COALESCE(tf.sn_itinerario,0) AS 'sn_itinerario'
+         ,  tf.ds_nome_intinerario AS 'ds_nome_intinerario'
+         ,  (tiob.id_turma = tf.id_turma) AS sn_turma_itinerario_obrigatorio
+         
+         ,  apm.cd_avaliacao AS 'cd_avaliacao'
+         ,  apm.nr_avaliacoes AS 'nr_avaliacoes'
+         ,  apm.cd_periodo_avaliacao AS 'cd_periodo_avaliacao'
+         ,  cpa.ds_periodo_avaliacao AS 'ds_periodo_avaliacao'
+         ,  cpa.ds_periodo_abreviado AS 'ds_periodo_abreviado'
+         ,  cpa.ds_periodicidade AS 'ds_periodicidade'
+         ,  apm.sn_exame AS 'sn_exame'
+         ,  apm.sn_segunda_epoca AS 'sn_segunda_epoca'
+         ,  apm.sn_conceitos
+         ,  apm.sn_recuperacao AS 'sn_recuperacao_etapa'
+         FROM
+            matriculas AS m
+         INNER JOIN fichaindividual AS f ON (
+            f.anosemestre = m.anosemestre AND
+            f.turmamatricula = m.turma AND
+            f.codigoaluno = m.codigoaluno
+         )
+         INNER JOIN situacao AS s ON (s.cd_situacao = m.situacao)
+         INNER JOIN situacao AS si ON (si.cd_situacao = f.situacao)
+         INNER JOIN pessoas AS p ON (p.cd_pessoa = f.codigoaluno)
+         INNER JOIN turmas AS tm ON (tm.anosemestre = f.anosemestre AND tm.codigo = f.turmamatricula)
+         INNER JOIN turmas AS tf ON (tf.anosemestre = f.anosemestre AND tf.codigo = f.turma)
+         LEFT JOIN turmas AS tiob ON (tiob.id_turma = m.id_turma_itinerario_obrigatorio)
+         INNER JOIN grades AS g ON (g.CD_GRADE = tm.cd_grade AND g.CD_CURSO = tm.curso)
+         INNER JOIN turnos AS tu ON (tu.codigo = tm.turno)
+         INNER JOIN coligadas col ON (tm.cd_coligada = col.cd_coligada)
+         INNER JOIN cursos_coligadas AS cc ON (cc.CD_CURSO = tm.curso AND cc.CD_COLIGADA = tm.cd_coligada)
+         INNER JOIN cursos_mestre AS cm ON (cm.CD_CURSO = cc.CD_CURSO)
+         INNER JOIN disciplinas AS d ON (d.codigo = f.disciplina AND d.curso = f.curso)
+         LEFT JOIN grades_disciplinas gd ON (
+            gd.cd_grade = tm.cd_grade AND
+            gd.cd_curso = tm.curso AND
+            gd.nr_serie = tm.serie AND
+            gd.cd_disciplina = f.disciplina
+         )
+         LEFT JOIN
+            disciplinas_categorias dc ON (dc.cd_categoria = gd.CD_DISCIPLINA_CATEGORIA)
+         INNER JOIN avaliacoes_parametros_matriz AS apm ON (
+            (tf.sn_itinerario = 0 AND apm.cd_avaliacao = COALESCE(gd.cd_avaliacao, tm.cd_avaliacao)) OR
+            (tf.sn_itinerario = 1 AND apm.cd_avaliacao = COALESCE(tiob.cd_avaliacao, tf.cd_avaliacao))
+         )
+         INNER JOIN cursos_periodos_avaliacoes AS cpa ON (cpa.cd_periodo_avaliacao = apm.cd_periodo_avaliacao)
+
+         WHERE
+            1 = 1
+         "" .
+         ((!empty($arrParametros["":cd_polo""]))
+            ? ""AND m.cd_polo IN (:cd_polo) ""
+            : NULL)
+         . ""
+         "" .
+         ((!empty($arrParametros["":nr_anosemestre""]))
+            ? ""AND f.anosemestre IN (:nr_anosemestre)""
+            : NULL)
+         . ""
+         "" .
+         ((!empty($arrParametros["":id_curso""]))
+            ? ""AND cm.ID_CURSO IN (:id_curso)""
+            : NULL)
+         . ""
+         "" .
+         ((!empty($arrParametros["":cd_turma""]))
+            ? ""AND f.turmamatricula IN (:cd_turma)""
+            : NULL)
+         . ""
+         "" .
+         ((!empty($arrParametros["":cd_situacao""]))
+            ? ""AND s.cd_situacao IN (:cd_situacao)""
+            : NULL)
+         . ""
+         "" .
+         ((!empty($arrParametros["":cd_pessoa""]))
+            ? ""AND f.codigoaluno IN (:cd_pessoa)""
+            : NULL)
+         . ""
+         GROUP BY
+            f.codigoaluno, f.turmamatricula, f.anosemestre, f.disciplina
+         ORDER BY
+            f.codigoaluno, f.turmamatricula, f.anosemestre, d.ordem
+      "";
+
+      $this
+         ->src('unimestre')
+         ->query($sql)
+         // aplicacao de filtro a consulta
+         ->params(
+            $arrParametros
+         )
+         // tratamento dos dados do array, sendo feita a aplicacao de mascaras aos dados
+         // para simplificar e melhorar a apresentacao dos dados na visualizacao
+         ->pipe(
+            new ColumnMeta(
+               array(
+                  ""cd_pessoa"" => $arrFormatoInteiro,
+                  ""nr_anosemestre"" => $arrFormatoInteiro,
+                  ""id_curso"" => $arrFormatoInteiro,
+                  ""cd_disciplina"" => $arrFormatoInteiro,
+                  ""nr_ordem"" => $arrFormatoInteiro,
+                  ""cd_grade"" => $arrFormatoInteiro
+               )
+            )
+         )
+         ->saveTo($consulta);
+
+      // criacao do primeiro dataStore para uso com o componente de tabela na visualizacao
+      $consulta
+         ->pipe($this->dataStore(""dados_consulta""));
+
+      $consulta
+         ->pipe(new Group(array(
+            ""by"" => array(
+               ""cd_pessoa"",
+               ""nr_anosemestre"",
+               ""cd_turma""
+            )
+         )))
+         ->pipe($this->dataStore(""dados_consulta_agrupado""));
+
+      require_once $this->path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'consulta_cabecalho.php'));
+   }
+}
+","<?php
+
+   use \koolreport\widgets\koolphp\Table;
+   use \koolreport\processes\Filter;
+
+   // path pasta
+   $path_include = join(DIRECTORY_SEPARATOR, array('..', '..', '..', 'projetos', 'relatorios', ''));
+
+   // margens
+   $ds_margem_superior = $this->arrDadosGerais->arrFormato->ds_margem_superior;
+   $ds_margem_inferior = $this->arrDadosGerais->arrFormato->ds_margem_inferior;
+   $ds_margem_esquerda = $this->arrDadosGerais->arrFormato->ds_margem_esquerda;
+   $ds_margem_direita = $this->arrDadosGerais->arrFormato->ds_margem_direita;
+
+   $sn_geracao = $_POST[""pdf""];
+
+   $sn_possui_cabecalho = !empty($this->dataStore(""dados_cabecalhos"")->data());
+?>
+
+<html>
+   <head>
+      <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'dados_head.php')); ?>
+      <style type=""text/css"">
+         .text-label {
+            font-size: 7pt !important;
+         }
+         .tabela-cabecalho td {
+            padding: 0.2rem !important;
+            vertical-align: middle !important;
+         }
+         .b {
+            font-weight: bold;
+         }
+         .legenda {
+            font-size: 8pt !important;
+         }
+         .borda {
+            border: 1px solid #dee2e6 !important;
+         }
+      </style>
+   </head>
+
+   <body class=""relatorio"">
+      <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'loader.php')); ?>
+      <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'barra_superior.php')); ?>
+      <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'css.php')); ?>
+
+      <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'valida_consulta_registros.php')); ?>
+
+      <?php foreach($this->dataStore(""dados_consulta_agrupado"") as $visualizacao) { ?>
+
+         <?php
+            // Dados filtrados por aluno, anosemestre e turma
+            $dados_consulta_filtrado = $this->dataStore(""dados_consulta"")
+               ->filter(
+                  ""cd_pessoa"",""="",$visualizacao[""cd_pessoa""]
+               )
+               ->filter(
+                  ""nr_anosemestre"",""="",$visualizacao[""nr_anosemestre""]
+               )
+               ->filter(
+                  ""cd_turma"",""="",$visualizacao[""cd_turma""]
+               );
+
+            // Dados referente a FORMAÇÃO GERAL BÁSICA
+            $dados_turmas_regular = $dados_consulta_filtrado
+               ->filter(
+                  ""sn_itinerario"",""="", ""0""
+               );
+
+            // Verifica os dados para montar o cabeçalho da turma regular
+            $arrCabecalhoRegular = [
+               'sn_exame' => 'N',
+               'sn_segunda_epoca' => 'N',
+               'sn_conceitos' => 'N',
+               'sn_recuperacao_etapa' => 'N'
+            ];
+
+            // Se alguma das disciplinas possuir exame, segunda época ou conceito utiliza para toda a turma
+            foreach($dados_turmas_regular as $dados) {
+
+               if ($dados['sn_exame'] == 'S') {
+                  $arrCabecalhoRegular['sn_exame'] = 'S';
+               }
+
+               if ($dados['sn_segunda_epoca'] == 'S') {
+                  $arrCabecalhoRegular['sn_segunda_epoca'] = 'S';
+               }
+
+               if ($dados['sn_conceitos'] == 'S') {
+                  $arrCabecalhoRegular['sn_conceitos'] = 'S';
+               }
+
+               if ($dados['sn_recuperacao_etapa'] == 'S') {
+                  $arrCabecalhoRegular['sn_recuperacao_etapa'] = 'S';
+               }
+
+            }
+
+            // Dados referente a ITINERÁRIOS FORMATIVOS
+            $dados_turmas_itinerario = $dados_consulta_filtrado
+               ->filter(
+                  ""sn_itinerario"",""="", ""1""
+               );
+
+            // Verifica os dados para montar o cabeçalho da turma itinerario
+            $arrCabecalhoItinerario = [
+               'sn_exame' => 'N',
+               'sn_segunda_epoca' => 'N',
+               'sn_conceitos' => 'N',
+               'sn_recuperacao_etapa' => 'N'
+            ];
+
+            // Se alguma das disciplinas possuir exame, segunda época ou conceito utiliza para toda a turma
+            foreach($dados_turmas_itinerario as $dados) {
+
+               if ($dados['sn_exame'] == 'S') {
+                  $arrCabecalhoItinerario['sn_exame'] = 'S';
+               }
+
+               if ($dados['sn_segunda_epoca'] == 'S') {
+                  $arrCabecalhoItinerario['sn_segunda_epoca'] = 'S';
+               }
+
+               if ($dados['sn_conceitos'] == 'S') {
+                  $arrCabecalhoItinerario['sn_conceitos'] = 'S';
+               }
+
+               if ($dados['sn_recuperacao_etapa'] == 'S') {
+                  $arrCabecalhoItinerario['sn_recuperacao_etapa'] = 'S';
+               }
+
+            }
+
+            $sn_possui_itinerario_formativo = !empty($dados_turmas_itinerario->data());
+
+            // Legenda
+            $ds_legenda = ""N"". substr($dados_turmas_regular[0]['ds_periodo_abreviado'],0,1)."" - Nota "" . $dados_turmas_regular[0]['ds_periodicidade'] . "" sem recuperação"";
+            $ds_legenda .= ""<br>"";
+            $ds_legenda .= ""REC - Recuperação da etapa"";
+            $ds_legenda .= ""<br>"";
+            $ds_legenda .= ""M"". substr($dados_turmas_regular[0]['ds_periodo_abreviado'],0,1)."" - Média "" . $dados_turmas_regular[0]['ds_periodicidade'] . "" pós recuperação"";
+            $ds_legenda .= ""<br>"";
+            $ds_legenda .= ""F - Faltas"";
+
+            // Valores para largura fixa de colunas, quando há turma de itinerário formativo
+            $nr_largura_nm_itinerario = $this->arrDadosGerais->arrFormato->cd_orientacao == 2 ? 85 : 60;
+            $nr_largura_base_disciplina = $this->arrDadosGerais->arrFormato->cd_orientacao == 2 ? 265 : 200;
+            $nr_largura_base_notas = $this->arrDadosGerais->arrFormato->cd_orientacao == 2 ? 465 : 270;
+         ?>
+
+         <div class=""container"">
+            <div
+               class=""conteudo""
+               style=""
+                  padding-top: <?=((!$sn_geracao) ? $ds_margem_superior : 0) . 'cm'?>;
+                  padding-bottom: <?=((!$sn_geracao) ? $ds_margem_inferior : 0) . 'cm'?>;
+                  padding-left: <?=$ds_margem_esquerda . 'cm'?>;
+                  padding-right: <?=$ds_margem_direita . 'cm'?>;
+                  ""
+            >
+               <div>
+                  <div
+                     style=""
+                        height: 130;
+                        <?php echo !$sn_possui_cabecalho ? 'display:none;' : '' ?>
+                        ""
+                  >
+                     <?php require $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'cabecalho.php')); ?>
+                  </div>
+               </div>
+
+               <div class=""text-center mt-3 mb-3"">
+                   <h1>BOLETIM</h1>
+               </div>
+
+               <table class=""tabela-cabecalho table table-bordered"">
+                  <tr>
+                     <td colspan=""3"" class=""text-left"">Nome: <?=$dados_turmas_regular[0]['nm_pessoa']?></td>
+                     <td class=""text-left"">Matrícula: <?=$dados_turmas_regular[0]['cd_pessoa']?></td>
+                  </tr>
+                  <tr>
+                     <td colspan=""3"" class=""text-left"">Curso: <?=$dados_turmas_regular[0]['ds_curso']?></td>
+                     <td class=""text-left"">Período: <?=$dados_turmas_regular[0]['nr_anosemestre_formatado']?></td>
+                  </tr>
+                  <tr>
+                     <td class=""text-left"">Habilitação: <?=$dados_turmas_regular[0]['ds_habilitacao']?></td>
+                     <td class=""text-left"">Turma: <?=$dados_turmas_regular[0]['cd_turma']?></td>
+                     <td class=""text-left"">Turno: <?=$dados_turmas_regular[0]['ds_turno']?></td>
+                     <td class=""text-left"">Situação: <?=$dados_turmas_regular[0]['ds_situacao_matricula']?></td>
+                  </tr>
+               </table>
+
+               <?php
+                  // Definicao dos campos que irão compor o boletim, referente a FORMAÇÃO GERAL BÁSICA
+                  $htmlCamposCabecalho0 = ""<td colspan='100%' CLASS='text-center'>{ds_categoria_disciplina}</td>"";
+                  $htmlCamposCabecalho1 = ""<td rowspan='2' class='text-label' style='vertical-align:middle;'>Disciplinas</td>"";
+                  $htmlCamposCabecalho2 = """";
+
+                  $arrCamposDetalhe = [];
+                  $ds_largura_disciplina = ""width:"" . $nr_largura_base_disciplina . ""px;"";
+                  $arrCamposDetalhe[""ds_disciplina""] = array(""cssStyle""=>""text-align:left;word-break:break-word;font-size: 7pt !important;"" . $ds_largura_disciplina);
+
+                  $nr_avaliacoes = $dados_turmas_regular[0]['nr_avaliacoes'];
+                  $ds_largura_notas = $sn_possui_itinerario_formativo ?
+                     ""width:"" . str_replace(',', '.', ($nr_largura_base_notas / ($nr_avaliacoes * 2))) . ""px;"" : """";
+                  for ($i = 1; $i <= $nr_avaliacoes; $i++) {
+                     
+                     $htmlCamposCabecalho1 .= ""<td class='text-center text-label' colspan="" . (($arrCabecalhoRegular['sn_recuperacao_etapa'] == 'S') ? 2 : 2 ) . "">"" . $i . ""º "" . $dados_turmas_regular[0]['ds_periodo_abreviado'] . ""</td>"";
+
+                     $htmlCamposCabecalho2 .= ""<td class='text-center text-label'>Médias</td><td class='text-center text-label'>Faltas</td>"";
+
+                     $arrCamposDetalhe['vl_nota_d' . $i] = array(""cssStyle""=>""vertical-align:middle;text-align:center;font-size: 7pt !important;"" . $ds_largura_notas);
+                     $arrCamposDetalhe['nr_falta'  . $i] = array(""cssStyle""=>""vertical-align:middle;text-align:center;font-size: 7pt !important;"" . $ds_largura_notas);
+
+                  }
+
+                  if ($arrCabecalhoRegular['sn_exame'] == 'S' || $arrCabecalhoRegular['sn_segunda_epoca'] == 'S') {
+                     $htmlCamposCabecalho1 .= ""<td rowspan='2'class='text-center text-label' style='vertical-align : middle;text-align:center;'>Méd. anual</td>"";
+                     $arrCamposDetalhe['vl_media_anual'] = array(""cssStyle""=>""vertical-align:middle;text-align:center;font-size: 7pt !important;"");
+                  }
+
+                  if ($arrCabecalhoRegular['sn_exame'] == 'S') {
+                     $htmlCamposCabecalho1 .= ""<td rowspan='2'class='text-center text-label' style='vertical-align : middle;text-align:center;'>Exame</td>"";
+                     $arrCamposDetalhe['vl_nota_exame'] = array(""cssStyle""=>""vertical-align:middle;text-align:center;font-size: 7pt !important;"");
+                  }
+
+                  if ($arrCabecalhoRegular['sn_segunda_epoca'] == 'S') {
+                     $htmlCamposCabecalho1 .= ""<td rowspan='2'class='text-center text-label' style='vertical-align : middle;text-align:center;'>2ª época</td>"";
+                     $arrCamposDetalhe['vl_segunda_epoca'] = array(""cssStyle""=>""vertical-align:middle;text-align:center;font-size: 7pt !important;"");
+                  }
+
+                  if ($arrCabecalhoRegular['sn_conceitos'] == 'S') {
+                     $htmlCamposCabecalho1 .= ""<td rowspan='2'class='text-center text-label' style='vertical-align : middle;text-align:center;'>Conceito final</td>"";
+                     $arrCamposDetalhe['ds_media'] = array(""cssStyle""=>""vertical-align:middle;text-align:center;font-size: 7pt !important;"");
+                  }
+
+                  $htmlCamposCabecalho1 .= ""<td rowspan='2'class='text-center text-label' style='vertical-align : middle;text-align:center;'>Méd. final</td>"";
+                  $arrCamposDetalhe['vl_media_final'] = array(""cssStyle""=>""vertical-align:middle;text-align:center;font-size: 7pt !important;"");
+
+                  // $htmlCamposCabecalho1 .= ""<td rowspan='2'class='text-center text-label' style='vertical-align : middle;text-align:center;'>Total de<br />Faltas</td>"";
+                  // $arrCamposDetalhe['nr_totalfaltas'] = array(""cssStyle""=>""vertical-align:middle;text-align:center;font-size: 7pt !important;"");
+
+                  $htmlCamposCabecalho1 .= ""<td rowspan='2'class='text-center text-label' style='vertical-align : middle;text-align:center;'>Freq.(%)</td>"";
+                  $arrCamposDetalhe['vl_frequencia'] = array(""cssStyle""=>""vertical-align:middle;text-align:center;font-size: 7pt !important;"");
+
+                  // $htmlCamposCabecalho1 .= ""<td rowspan='2'class='text-center text-label' style='vertical-align : middle;text-align:center;'>Aulas</td>"";
+                  // $arrCamposDetalhe['ds_nr_aulas_dadas'] = array(""cssStyle""=>""vertical-align:middle;text-align:center;font-size: 7pt !important;"");
+
+                  $htmlCamposCabecalho1 .= ""<td rowspan='2'class='text-center text-label' style='vertical-align:middle;text-align:center;'>Sit.</td>"";
+                  $arrCamposDetalhe['ds_sigla_situacao_fichaindividual'] = array(""cssStyle""=>""vertical-align:middle;text-align:center;font-size: 7pt !important;"");
+
+                  Table::create(array(
+                     ""dataSource""=>$dados_turmas_regular,
+                     ""grouping""=>array(
+                        ""ds_categoria_disciplina""=>array(
+                           ""calculate""=>"""",
+                           ""top""=>$htmlCamposCabecalho0,
+                           ""bottom""=>"""",
+                        ),
+                        ""cd_pessoa""=>array(
+                           ""calculate""=>"""",
+                           ""top""=>$htmlCamposCabecalho1,
+                           ""bottom""=>"""",
+                        ),
+                        ""cd_curso""=>array(
+                           ""calculate""=>"""",
+                           ""top""=>$htmlCamposCabecalho2,
+                           ""bottom""=>"""",
+                        ),
+                     ),
+                     ""showHeader""=>false,
+                     ""columns""=>$arrCamposDetalhe,
+                     ""cssClass""=>array(
+                        ""table""=>""table-bordered table-striped table-sm""
+                     ),
+                     ""sorting""=>array(
+                        ""nr_ordem""=>""asc""
+                     )
+                  ));
+               ?>
+
+               <?php
+                  // Definicao dos campos que irão compor o boletim, referente a ITINERÁRIOS FORMATIVOS
+                  if ($sn_possui_itinerario_formativo) {
+                     $htmlCamposCabecalho0 = ""<td colspan='100%' CLASS='text-center'>ITINERÁRIOS FORMATIVOS</td>"";
+                     $htmlCamposCabecalho1 = ""<td colspan='2' rowspan='2' class='text-label' style='vertical-align:middle;'>Disciplinas</td>"";
+                     $htmlCamposCabecalho2 = """";
+
+                     $arrCamposDetalhe = [];
+                     $arrCamposDetalhe[""ds_nome_intinerario""] = array(""cssStyle""=>""vertical-align:middle;text-align:left;background-color:#FFFFFF !important;width:"" . $nr_largura_nm_itinerario . ""px;font-size: 7pt !important;"");
+                     $arrCamposDetalhe[""ds_disciplina""] = array(""cssStyle""=>""vertical-align:middle;text-align:left;width:"" . ($nr_largura_base_disciplina - $nr_largura_nm_itinerario) . ""px;word-break: break-word;font-size: 7pt !important;"");
+
+                     $nr_avaliacoes = $dados_turmas_itinerario[0]['nr_avaliacoes'];
+                     $cd_periodo_avaliacao = $dados_turmas_itinerario[0]['cd_periodo_avaliacao'];
+                     $ds_largura_notas = ""width:"" . str_replace(',', '.', ($nr_largura_base_notas / ($nr_avaliacoes * 2))) . ""px !important;"";
+
+                     for ($i = 1; $i <= $nr_avaliacoes; $i++) {
+
+                        $htmlCamposCabecalho1 .= ""<td class='text-center text-label' colspan="" . (($arrCabecalhoItinerario['sn_recuperacao_etapa'] == 'S') ? 2 : 2 ) . "">"" . $i . ""º "" . $dados_turmas_itinerario[0]['ds_periodo_abreviado'] . ""</td>"";
+
+                        $htmlCamposCabecalho2 .= ""<td class='text-center text-label'>Média</td><td class='text-center text-label'>Faltas</td>"";
+
+                        $arrCamposDetalhe['vl_nota_d' . $i] = array(""cssStyle""=>""vertical-align:middle;text-align:center;font-size: 7pt !important;"" . $ds_largura_notas);
+                        $arrCamposDetalhe['nr_falta'  . $i] = array(""cssStyle""=>""vertical-align:middle;text-align:center;font-size: 7pt !important;"" . $ds_largura_notas);
+
+                     }
+
+                     if ($arrCabecalhoItinerario['sn_exame'] == 'S' || $arrCabecalhoItinerario['sn_segunda_epoca'] == 'S') {
+                        $ds_media_periodo = ($nr_avaliacoes == 1 && $cd_periodo_avaliacao == 5) || ($nr_avaliacoes == 2 && $cd_periodo_avaliacao == 2) ? 'Méd. semestral' : 'Méd. anual';
+                        $htmlCamposCabecalho1 .= ""<td rowspan='2'class='text-center text-label' style='vertical-align:middle;text-align:center;'>$ds_media_periodo</td>"";
+                        $arrCamposDetalhe['vl_media_anual'] = array(""cssStyle""=>""vertical-align:middle;text-align:center;font-size: 7pt !important;"");
+                     }
+
+                     if ($arrCabecalhoItinerario['sn_exame'] == 'S') {
+                        $htmlCamposCabecalho1 .= ""<td rowspan='2'class='text-center text-label' style='vertical-align:middle;text-align:center;'>Exame</td>"";
+                        $arrCamposDetalhe['vl_nota_exame'] = array(""cssStyle""=>""vertical-align:middle;text-align:center;font-size: 7pt !important;"");
+                     }
+
+                     if ($arrCabecalhoItinerario['sn_segunda_epoca'] == 'S') {
+                        $htmlCamposCabecalho1 .= ""<td rowspan='2'class='text-center text-label' style='vertical-align:middle;text-align:center;'>2ª época</td>"";
+                        $arrCamposDetalhe['vl_segunda_epoca'] = array(""cssStyle""=>""vertical-align:middle;text-align:center;font-size: 7pt !important;"");
+                     }
+
+                     if ($arrCabecalhoItinerario['sn_conceitos'] == 'S') {
+                        $htmlCamposCabecalho1 .= ""<td rowspan='2'class='text-center text-label' style='vertical-align:middle;text-align:center;'>Conceito final</td>"";
+                        $arrCamposDetalhe['ds_media'] = array(""cssStyle""=>""vertical-align:middle;text-align:center;font-size: 7pt !important;"");
+                     }
+
+                     $htmlCamposCabecalho1 .= ""<td rowspan='2'class='text-center text-label' style='vertical-align:middle;text-align:center;'>Méd. final</td>"";
+                     $arrCamposDetalhe['vl_media_final'] = array(""cssStyle""=>""vertical-align:middle;text-align:center;font-size: 7pt !important;"");
+
+                     // $htmlCamposCabecalho1 .= ""<td rowspan='2'class='text-center text-label' style='vertical-align : middle;text-align:center;'>Total de<br />Faltas</td>"";
+                     // $arrCamposDetalhe['nr_totalfaltas'] = array(""cssStyle""=>""vertical-align:middle;text-align:center;font-size: 7pt !important;"");
+
+                     $htmlCamposCabecalho1 .= ""<td rowspan='2'class='text-center text-label' style='vertical-align:middle;text-align:center;'>Freq.(%)</td>"";
+                     $arrCamposDetalhe['vl_frequencia'] = array(""cssStyle""=>""vertical-align:middle;text-align:center;font-size: 7pt !important;"");
+
+                     // $htmlCamposCabecalho1 .= ""<td rowspan='2'class='text-center text-label' style='vertical-align : middle;text-align:center;'>Aulas</td>"";
+                     // $arrCamposDetalhe['ds_nr_aulas_dadas'] = array(""cssStyle""=>""vertical-align:middle;text-align:center;font-size: 7pt !important;"");
+
+                     $htmlCamposCabecalho1 .= ""<td rowspan='2'class='text-center text-label' style='vertical-align:middle;text-align:center;'>Sit.</td>"";
+                     $arrCamposDetalhe['ds_sigla_situacao_fichaindividual'] = array(""cssStyle""=>""vertical-align:middle;text-align:center;font-size: 7pt !important;"");
+
+                     Table::create(array(
+                        ""dataSource""=>$dados_turmas_itinerario,
+                        ""grouping""=>array(
+                           ""nr_anosemestre""=>array(
+                              ""calculate""=>"""",
+                              ""top""=>$htmlCamposCabecalho0,
+                              ""bottom""=>"""",
+                           ),
+                           ""cd_pessoa""=>array(
+                              ""calculate""=>"""",
+                              ""top""=>$htmlCamposCabecalho1,
+                              ""bottom""=>"""",
+                           ),
+                           ""cd_curso""=>array(
+                              ""calculate""=>"""",
+                              ""top""=>$htmlCamposCabecalho2,
+                              ""bottom""=>"""",
+                           ),
+                        ),
+                        ""showHeader""=>false,
+                        ""columns""=>$arrCamposDetalhe,
+                        ""cssClass""=>array(
+                           ""table""=>""table-bordered table-striped table-sm""
+                        ),
+                        ""sorting""=>array(
+                           ""sn_turma_itinerario_obrigatorio""=>""DESC"",
+                           ""ds_nome_intinerario""=>""asc"",
+                           ""nr_ordem""=>""asc""
+                        ),
+                        ""removeDuplicate""=>array(
+                           ""ds_nome_intinerario""
+                        )
+                     ));
+                  }
+               ?>
+
+               <span class=""legenda b"">Observações:</span>
+
+               <table class=""table borda mt-1"">
+                  <tr>
+                     <td class=""text-justify legenda"">
+                        <?= $dados_turmas_regular[0]['ds_obs_turma'] ?>
+                     </td>
+                  </tr>
+               </table>
+
+               <div class=""text-right fonte mt-3"">
+                  <?= $dados_consulta_filtrado[0]['ds_cidade_coligada'] ?>, <?= $dados_consulta_filtrado[0]['dt_atual'] ?>
+               </div>
+               
+            </div>
+            
+            <div class=""page-break"" style=""page-break-after: always;""></div>
+         </div>
+
+      <?php } ?>
+   </body>
+</html>","<?php
+
+require_once ""Relatorio.php"";
+
+$relatorio = new Relatorio;
+
+$relatorio->run()->render();
+","[ { ""tipo"": ""uni-select-polo"", ""obrigatorio"": false, ""label"": ""Polo"", ""ds_campo"": ""cd_polo"" }, { ""tipo"": ""campo-anosemestre"", ""obrigatorio"": true, ""label"": ""Ano/Semestre"", ""ds_campo"": ""nr_anosemestre"" }, { ""tipo"": ""uni-select-curso"", ""obrigatorio"": false, ""label"": ""Curso"", ""ds_campo"": ""id_curso"" }, { ""tipo"": ""uni-busca-turma"", ""obrigatorio"": false, ""label"": ""Turma"", ""ds_campo"": ""cd_turma"" }, { ""tipo"": ""uni-busca-pessoa"", ""obrigatorio"": false, ""label"": ""Aluno"", ""ds_campo"": ""cd_pessoa"" }, { ""tipo"": ""uni-select-situacao"", ""obrigatorio"": false, ""label"": ""Situacao"", ""ds_campo"": ""cd_situacao"", ""valor"": [ 0, 1, 2, 9, 11 ] } ]",72,,"INSERT IGNORE INTO rgo_relatorios (
+		cd_relatorio,
+		cd_tipo,
+		cd_agrupamento,
+		sn_ativo,
+		nm_relatorio,
+		sn_padrao,
+		ds_filtro,
+		nm_arquivo,
+		me_relatorio_index,
+		me_relatorio_config,
+		me_relatorio_view,
+		cd_relatorio_template,
+		cd_formato,
+		me_documentacao_padrao,
+		me_documentacao_cliente,
+		ds_chave,
+		dt_base,
+		sn_autentique,
+		ds_autentique_config
+    )
+		VALUES (
+		NULL,
+		3,6,1,""Boletim REDE"",0,
+		NULL,
+		NULL,
+		NULL,
+		NULL,
+		NULL,
+		 NULL, NULL,""O relatório de Boletim apresenta informações referentes ao histórico de disciplinas dos alunos com base em um ano/semestre e turma de referência. 
+
+Caso no parâmetro de avaliação da turma do estudante esteja selecionado que não serão utilizadas recuperações por etapa, serão listadas as médias definitivas e faltas do aluno  apenas, caso no parâmetro esteja selecionado que serão utilizadas recuperações por etapa, serão mostradas as médias sem recuperação, as notas de recuperação, médias definitivas e as faltas, conforme a periodicidade informada no parâmetro de avaliação da turma correspondente.
+
+Além dos resultados finais, é mostrada uma coluna com a quantidade de aulas cadastradas nos diários de classe de cada disciplina.
+
+O relatório também apresentará as notas de exame final e segunda época para as instituições que utilizam essa estrutura de avaliação."", NULL, NULL,""2023-12-28 11:05:35"",0, NULL)",,,,1367,COC Blumenau,"COC Rede - Bnu, Colégio",COC Blumenau

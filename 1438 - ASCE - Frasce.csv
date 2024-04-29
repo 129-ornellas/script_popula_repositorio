@@ -1,0 +1,742 @@
+ds_agrupamento,nm_relatorio,me_relatorio_config,me_relatorio_view,me_relatorio_index,ds_filtro,cd_relatorio,opcao_tipo_impressao,insert_statement,opcoes_impressao,me_config,LENGHT_opcoes_impressao,cd_unicontrole,nome,apelido,nome_tratado
+Contábeis,1.1 Faturamento detalhado Bolsas,"<?php
+
+   $PARMS = array('PASTA' => join(DIRECTORY_SEPARATOR, array('..', '..', '..', '')), 'SEGURO' => false, 'NO-SESSION' => true);
+   require_once( $PARMS['PASTA'] . 'nucleo.php' );
+   require_once join(DIRECTORY_SEPARATOR, array('..', '..', '..', 'vendor', 'koolreport', 'core',  'autoload.php'));
+   header ('Content-type: text/html; charset=UTF-8');
+
+   use \koolreport\processes\ColumnMeta;
+   use \koolreport\processes\Group;
+   use \koolreport\pivot\processes\Pivot;
+
+
+   // classe padrao do relatorio
+   class Relatorio extends \koolreport\KoolReport {
+      use \koolreport\bootstrap4\Theme;
+      use \koolreport\inputs\Bindable;
+      use \koolreport\inputs\POSTBinding;
+      use \koolreport\export\Exportable;
+      use \koolreport\excel\ExcelExportable;
+      use \koolreport\cloudexport\Exportable;
+
+    const C_SN_CLOUD_EXPORT = (PHP_MAJOR_VERSION >= 7);
+
+      public $path_include;
+      public $arrDadosFiltro;
+      public $arrDadosGerais;
+      public $sn_autenticado = true;
+
+      public function __construct() {
+
+         try {
+
+            $this->path_include = join(DIRECTORY_SEPARATOR, array('..', '..', '..', 'projetos', 'relatorios', ''));
+            parent::__construct();
+
+         } catch (Exception $e) {
+
+            echo 'Exceção capturada: ',  $e->getMessage(), ""\n"";
+            die;
+
+         }
+
+      }
+
+      // inicializacao dos filtros
+      function defaultParamValues() {
+         return array(
+            ""filtros""=>'{}',
+            ""gerais""=>'{}'
+         );
+      }
+
+      // resgate do $_POST para vinculo com os parametros
+      function bindParamsToInputs() {
+         return array(
+            ""filtros"",
+            ""gerais""
+         );
+      }
+
+      // funcao responsavel por realizar a conexao com o banco de dados
+      // e resgate dos dados tratamento dos dados do $_POST
+      public function settings() {
+
+         Nucleo::import( 'relatorios.RelatoriosConexao' );
+         $objRelatoriosConexao = new RelatoriosConexao;
+
+         return $objRelatoriosConexao->settings();
+
+      }
+
+      // funcao responsavel por manter as consultas a serem executadas pelo relatorio
+      // e geracao dos array de dados para uso posterior na visualizacao
+      public function setup() {
+
+         require_once $this->path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'formatos.php'));
+
+         if (ctype_xdigit($_POST[""filtros""])) {
+            $_POST[""filtros""] = hex2bin($_POST[""filtros""]);
+         }
+
+         if (ctype_xdigit($_POST[""gerais""])) {
+            $_POST[""gerais""] = hex2bin($_POST[""gerais""]);
+         }
+
+         if (isset($_POST['filtros'])) {
+            $this->arrDadosFiltro = json_decode($_POST['filtros']);
+         } else {
+            $this->arrDadosFiltro = json_decode($_POST);
+         }
+
+         if (isset($_POST['gerais'])) {
+            $this->arrDadosGerais = json_decode($_POST['gerais']);
+         }
+
+         $arrParametros = [];
+
+         foreach ($this->arrDadosFiltro as $filtro => $valor) {
+            if (!empty($valor->ds_valor)) {
+                $arrParametros["":"" . $filtro] = $valor->ds_valor;
+            }
+         }
+
+         $this->src('unimestre')->query(
+            ""
+            SELECT
+               tu.cd_coligada as cd_coligada_cabecalho,
+               pe.nm_pessoa as nm_pessoa,
+               pe.cd_pessoa as cd_pessoa,
+               me.cd_mensalidade,
+               me.valordesconto as valordesconto,
+
+               "".
+               ($this->arrDadosGerais->arrOpcoes->tp_agrupamento->me_configuracao == ""curso_turma""
+                     ? "" CONCAT(IFNULL(cm.ds_curso, '<sem curso definido>')) AS grupo1,
+                         CONCAT(CONCAT(me.turma)) AS grupo2,
+                       ""
+                     : NULL
+               ) .
+               ($this->arrDadosGerais->arrOpcoes->tp_agrupamento->me_configuracao == ""curso_fase""
+                     ? "" CONCAT(IFNULL(cm.ds_curso, '<sem curso definido>')) AS grupo1,
+                         REPLACE(cm.ds_mascara_serie, '\$SERIE', tu.serie)  AS grupo2,
+                       ""
+                     : NULL
+               ) .
+               ($this->arrDadosGerais->arrOpcoes->tp_agrupamento->me_configuracao == ""curso""
+                     ? "" 'Total' AS grupo1,
+                         CONCAT(CONCAT(cm.cd_curso, ' - ', cm.ds_curso)) AS grupo2,
+                       ""
+                     : NULL
+               ) .
+               ($this->arrDadosGerais->arrOpcoes->tp_agrupamento->me_configuracao == ""centro_custo""
+                     ? "" 'Total' AS grupo1,
+                         CONCAT(IFNULL(custo.ds_centro, '<sem centro de custo definido>')) AS grupo2,
+                       ""
+                     : NULL
+               ) .
+               ($this->arrDadosGerais->arrOpcoes->tp_agrupamento->me_configuracao == ""tipo_titulo""
+                     ? "" 'Total' AS grupo1,
+                         CONCAT(IFNULL(tp.ds_tipo_titulo, '<sem tipo de titulo definido>')) AS grupo2,
+                       ""
+                     : NULL
+               ) .
+               ($this->arrDadosGerais->arrOpcoes->tp_agrupamento->me_configuracao == ""coligada""
+                     ? "" 'Total' AS grupo1,
+                         CONCAT(c.nm_coligada) AS grupo2,
+                       ""
+                     : NULL
+               ) .
+               ""
+               IF(cr.nr_sequencia = 1,
+                  '1.0 Valor Bruto',
+                   ac.ds_acao
+               ) as ds_acao,
+
+               DATE_FORMAT(me.dt_competencia, '%d/%m/%Y') AS dt_competencia,
+               ROUND(
+                  SUM(
+                     IF(cr.nr_sequencia = 1,
+                        IF(me.dt_competencia >= :dt_inicio AND me.dt_competencia < DATE_ADD(:dt_fim, INTERVAL 1 DAY),
+                           IF(me.tipoparcela = 0,
+                              (IFNULL(me.valorbruto,0) + IFNULL(me.valorextra,0)),
+                              IF(me.tipoparcela = 4, IFNULL(me.vl_faturamento,0), 0)
+                           )
+                        , 0)
+                     , 0 )
+
+                  )
+               ,2) as valor_bruto,
+
+               ROUND(
+                  SUM(
+                     IF( (ac.cd_tipo_acao = 3 AND cr.sn_desc_condicional = 0 AND me.descontoextra > 0),
+                        IF(me.dt_competencia >= :dt_inicio AND me.dt_competencia < DATE_ADD(:dt_fim, INTERVAL 1 DAY), IFNULL(cr.vl_saida,0)
+                           , 0)
+                        , 0)
+                  )
+               ,2) as valor_bolsas,
+
+               ROUND(
+                  SUM(
+                     IF(cr.nr_sequencia = 1,
+                        IF(me.dt_competencia >= :dt_inicio AND me.dt_competencia < DATE_ADD(:dt_fim, INTERVAL 1 DAY),
+                           IF(me.tipoparcela = 0, (IFNULL(me.valorbruto,0) + IFNULL(me.valorextra,0)),
+                              IF(me.tipoparcela = 4, IFNULL(me.vl_faturamento,0), 0)
+                           )
+                        , 0)
+                      , 0 )
+                  -
+                   IF( (ac.cd_tipo_acao = 3 AND cr.sn_desc_condicional = 0 AND me.descontoextra > 0),
+                     IF(me.dt_competencia >= :dt_inicio AND me.dt_competencia < DATE_ADD(:dt_fim, INTERVAL 1 DAY), IFNULL(cr.vl_saida,0)
+                     , 0)
+                  , 0 )
+                  )
+               ,2) as valor_liquido,
+
+                  IF(
+               ROUND(
+                     IF(cr.nr_sequencia = 1,
+                        IF(me.dt_competencia >= :dt_inicio AND me.dt_competencia < DATE_ADD(:dt_fim, INTERVAL 1 DAY),
+                           IF(me.tipoparcela = 0, (IFNULL(me.valorbruto,0) + IFNULL(me.valorextra,0)),
+                              IF(me.tipoparcela = 4, IFNULL(me.vl_faturamento,0), 0)
+                           )
+                        , 0)
+                      , 0 )
+                  -
+                   IF( (ac.cd_tipo_acao = 3 AND cr.sn_desc_condicional = 0 AND me.descontoextra > 0),
+                     IF(me.dt_competencia >= :dt_inicio AND me.dt_competencia < DATE_ADD(:dt_fim, INTERVAL 1 DAY), IFNULL(cr.vl_saida,0)
+                     , 0)
+                  , 0 )
+               ,2)
+               <> 0
+               , me.codigoaluno
+               , NULL )
+
+
+                as qtd_base
+
+
+
+            FROM
+               mensalidades me
+               INNER JOIN coligadas as c ON (c.cd_coligada = me.cd_coligada)
+               INNER JOIN pessoas pe ON (me.codigoaluno = pe.cd_pessoa)
+               INNER JOIN fin_config_tipos_titulo tp ON (me.cd_tipo_titulo = tp.cd_tipo_titulo AND tp.cd_coligada_matriz = c.cd_coligada_matriz)
+               INNER JOIN fin_mov_cr as cr ON (cr.cd_mensalidade = me.cd_mensalidade)
+               INNER JOIN fin_acoes_movimento as ac ON (cr.cd_acao = ac.cd_acao)
+               LEFT JOIN turmas tu ON (me.anosemestre = tu.anosemestre AND me.turma = tu.codigo)
+               LEFT JOIN matriculas on (matriculas.codigoaluno = me.codigoaluno and matriculas.turma = me.turma and matriculas.anosemestre = me.anosemestre)
+               LEFT JOIN cursos_coligadas cc ON (tu.curso = cc.CD_CURSO AND tu.cd_coligada = cc.CD_COLIGADA)
+               LEFT JOIN cursos_mestre cm ON (me.curso = cm.CD_CURSO)
+               LEFT JOIN departamentos dp ON (cc.CD_DEPTO = dp.codigo)
+               LEFT JOIN fin_config_plano_contas pc ON (pc.cd_conta = me.cd_plano_conta AND pc.cd_coligada_matriz = c.cd_coligada_matriz)
+               LEFT JOIN fin_config_centro_custos custo ON (custo.cd_centro = me.cd_centro_custo AND custo.cd_coligada_matriz = c.cd_coligada_matriz)
+               LEFT JOIN unim_polo_turma ON (tu.id_turma = unim_polo_turma.id_turma and unim_polo_turma.cd_polo = matriculas.cd_polo)
+
+
+            WHERE
+               (me.dt_competencia >= :dt_inicio AND me.dt_competencia < DATE_ADD(:dt_fim, INTERVAL 1 DAY))
+               AND me.situacao <> 10
+               AND tp.sn_faturamento = 1
+               AND (
+                  me.situacao NOT IN (4,5,7,8)
+                  OR DATE_FORMAT(me.dt_competencia, '%Y%m') < DATE_FORMAT(me.datapagamento, '%Y%m')
+                  OR me.sn_nfe_gerada = 1
+                  OR me.tipoparcela = 1
+                  )
+               "" .
+                  ((!empty($arrParametros["":cd_coligada""]))
+                     ? ""AND me.cd_coligada IN (:cd_coligada)""
+                     : NULL
+                  )
+               . ""
+               "" .
+               ((!empty($arrParametros["":cd_polo""]))
+                  ? ""AND unim_polo_turma.cd_polo IN (:cd_polo)""
+                  : NULL
+               )
+               . ""
+               "" .
+                  ((!empty($arrParametros["":cd_departamento""]))
+                     ? ""AND me.depto IN (:cd_departamento)""
+                     : NULL
+                  )
+               . ""
+               "" .
+                  ((!empty($arrParametros["":id_curso""]))
+                     ? ""AND cm.id_curso IN (:id_curso)""
+                     : NULL
+                  )
+               . ""
+               "" .
+                  ((!empty($arrParametros["":cd_tipo_titulo""]))
+                     ? ""AND me.cd_tipo_titulo IN (:cd_tipo_titulo)""
+                     : NULL
+                  )
+               . ""
+               "" .
+                  ((!empty($arrParametros["":cd_acao_movimento""]))
+                     ? ""AND (cr.nr_sequencia = 1 OR ac.cd_acao IN (:cd_acao_movimento) )""
+                     : NULL
+                  )
+               . ""
+               "" .
+                  ((!empty($arrParametros["":codigoaluno""]))
+                     ? ""AND me.codigoaluno IN (:codigoaluno)""
+                     : NULL
+                  )
+               . ""
+
+            GROUP BY cd_pessoa, grupo1,
+               grupo2, ds_acao
+
+
+               ""
+               .
+               // aplicacao da opcao de impressao sn_sintetico recebida da tela de impressao
+                  ($this->arrDadosGerais->arrOpcoes->sn_sintentico->me_configuracao != ""sintetico""
+                     ? "", pe.cd_pessoa""
+                     : NULL
+                  )
+               . ""
+
+               HAVING valor_bruto >0 OR
+                   valor_bolsas > 0 OR
+                   valor_liquido > 0
+            ""
+          )
+         // aplicacao de filtro a consulta
+
+         ->params(
+            $arrParametros
+         )
+         // tratamento dos dados do array, sendo feita a aplicacao de mascaras aos dados
+         // para simplificar e melhorar a apresentacao dos dados na visualizacao
+         ->pipe(
+            new ColumnMeta(
+               array(
+                  ""dt_competencia"" => $arrFormatoData,
+                  ""cd_pessoa"" => $arrFormatoInteiro,
+                  ""valor_bruto"" => $arrFormatoMoeda,
+                  ""valor_bolsas"" => $arrFormatoMoeda,
+                  ""valor_liquido"" => $arrFormatoMoeda
+               )
+            )
+         )
+         ->saveTo($consulta);
+
+         // tratamento do array para aplicacao de um agrupamento
+         // e geracao de um segundo dataStore para uso com o componente de grafico na visualizacao
+
+         if ($this->arrDadosGerais->arrOpcoes->sn_sintentico->me_configuracao != ""sintetico"") {
+
+            $grupo_cross = array(""cd_pessoa"", ""grupo1"", ""grupo2"", ""ds_acao"", ""nm_pessoa"");
+            $linha = ""grupo1, grupo2, nm_pessoa"";
+            $coluna = "" ds_acao"";
+
+         } else {
+            $grupo_cross = array(""cd_pessoa"", ""grupo1"", ""grupo2"", ""ds_acao"");
+            $linha = ""grupo1, grupo2"";
+            $coluna = "" ds_acao"";
+
+         }
+
+         $consulta->pipe(new Group(array(
+            ""by""=>$grupo_cross,
+            ""sum""=>array(""valor_liquido"", ""qtd_base"")
+
+         )))
+         ->pipe(new Pivot(array(
+            ""dimensions""=>array(
+               ""row""=>$linha,
+               ""column""=>$coluna
+            ),
+            ""aggregates""=>array(
+               ""sum""=>array(""valor_liquido""),
+               ""distinctCount""=>array(""qtd_base"")
+            ),
+            ""customAggregates"" => [
+                ""distinctCount"" => [
+                    ""{initValue}"" => 0,
+                    ""{aggValue}"" => function($aggValue, $value, $field, $row) use (& $distinctValues) {
+                        # var_dump($aggValue);die();
+                        if (! in_array($value, $distinctValues) ) {
+                            $aggValue++;
+                            array_push($distinctValues, $value);
+                        }
+                        return $aggValue;
+                    }
+                ]
+
+
+            ],
+         )))
+         ->pipe($this->dataStore(""dados_consulta""));
+
+         require_once $this->path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'consulta_cabecalho.php'));
+      }
+   }
+","<?php
+
+use \koolreport\widgets\koolphp\Table;
+use \koolreport\d3\PieChart;
+use \koolreport\pivot\widgets\PivotTable;
+
+// path pasta
+$path_include = join(DIRECTORY_SEPARATOR, array('..', '..', '..', 'projetos', 'relatorios', ''));
+
+// margens
+$ds_margem_superior = $this->arrDadosGerais->arrFormato->ds_margem_superior;
+$ds_margem_inferior = $this->arrDadosGerais->arrFormato->ds_margem_inferior;
+$ds_margem_esquerda = $this->arrDadosGerais->arrFormato->ds_margem_esquerda;
+$ds_margem_direita = $this->arrDadosGerais->arrFormato->ds_margem_direita;
+
+$sn_possui_cabecalho = !empty($this->dataStore(""dados_cabecalhos"")->data());
+?>
+
+<html>
+
+<head>
+    <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'dados_head.php')); ?>
+    <style>
+        .div-folha {
+            background: white;
+            display: block;
+            margin: 0 auto !important;
+            padding: unset !important;
+            margin-bottom: 20px !important;
+            box-shadow: 0 0 0.5cm rgba(0,0,0,0.5);
+            min-width: 29.7cm;
+            max-width: 45cm;
+            min-height: 21cm;
+        }
+        @media print {
+            .div-folha {
+                width: 29.7cm !important;
+                min-width: 29.7cm !important;
+                min-height: 0cm;
+                margin: 0 !important;
+                padding-top: 0 !important;
+                padding-bottom: 0 !important;
+                box-shadow: 0;
+            }
+        }
+    </style>
+</head>
+
+<body class=""relatorio"">
+    <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'loader.php')); ?>
+    <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'barra_superior.php')); ?>
+    <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'css.php')); ?>
+    <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'css_pequeno.php')); ?>
+
+    <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'valida_consulta_registros.php')); ?>
+
+    <?php if (!empty($this->dataStore(""dados_consulta"")->data())) { ?>
+
+        <div class=""div-folha"" style=""page-break-after: auto;"">
+            <div class=""conteudo"" style=""
+               padding-top: <?= ((!$sn_geracao) ? $ds_margem_superior : 0) . 'cm' ?>;
+               padding-bottom: <?= ((!$sn_geracao) ? $ds_margem_inferior : 0) . 'cm' ?>;
+               padding-left: <?= $ds_margem_esquerda . 'cm' ?>;
+               padding-right: <?= $ds_margem_direita . 'cm' ?>;
+               "">
+
+                <div>
+                    <div class=""page-header"" style=""
+                     height: 80;
+                     <?php echo !$sn_possui_cabecalho ? 'display:none;' : '' ?>
+                     "">
+                        <?php require $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'cabecalho.php')); ?>
+                    </div>
+                </div>
+
+                <div>
+                    <?php require $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'filtro.php')); ?>
+                </div>
+
+
+                <div>
+
+                    <h3 class=""text-center"" style=""margin: 1rem;"">
+                        <?= $this->arrDadosGerais->nm_relatorio . "" - "" . $this->arrDadosGerais->arrOpcoes->sn_sintentico->ds_opcao ?>
+                    </h3>
+
+                    <?php
+
+                    PivotTable::create(array(
+                        ""dataStore"" => $this->dataStore(""dados_consulta""),
+                        ""rowDimension"" => ""row"",
+                        ""showDataHeaders"" => false,
+                        ""hideTotalRow"" => false,
+                        ""hideTotalColumn"" => false,
+                        ""hideSubtotalRow"" => true,
+                        'rowCollapseLevels' => array(2),
+                        'totalName' => 'Valor Líquido',
+                        'width' => '100%',
+
+                        ""map"" => array(
+                            ""dataField"" => function ($dataField, $headerInfo) {
+                                if ($this->arrDadosGerais->arrOpcoes->tp_agrupamento->me_configuracao == ""curso_turma"") {
+                                    $v = 'Curso | Turma';
+                                } elseif ($this->arrDadosGerais->arrOpcoes->tp_agrupamento->me_configuracao == ""curso_fase"") {
+                                    $v = 'Curso | Fase';
+                                } elseif ($this->arrDadosGerais->arrOpcoes->tp_agrupamento->me_configuracao == ""curso"") {
+                                    $v = 'Curso ';
+                                } elseif ($this->arrDadosGerais->arrOpcoes->tp_agrupamento->me_configuracao == ""centro_custo"") {
+                                    $v = 'Centro de Custo';
+                                } elseif ($this->arrDadosGerais->arrOpcoes->tp_agrupamento->me_configuracao == ""tipo_titulo"") {
+                                    $v = 'Tipo de Título';
+                                } elseif ($this->arrDadosGerais->arrOpcoes->tp_agrupamento->me_configuracao == ""coligada"") {
+                                    $v = 'Unidade';
+                                }
+                                return $v;
+                            },
+                            'dataCell' => function ($value, $cellInfo) {
+
+                                if (($cellInfo['column']['hasTotal'] == true) && ($cellInfo['fieldName'] == 'qtd_base - distinctCount')) {
+                                    $cellInfo['column']['qtd_base - distinctCount']['total'] = false;
+                                    return ""-"";
+                                } else {
+                                    return $cellInfo['formattedValue'];
+                                }
+                            },
+
+
+                            // 'dataCell' => function($value, $cellInfo) {
+
+                            //       if (($cellInfo['column']['hasTotal'] == true) && ($cellInfo['fieldName'] != 'valor_liquido - sum')) {
+                            //          return """";
+                            //       } else {
+                            //         return $cellInfo['formattedValue'];
+                            //       }
+
+                            //   },
+
+                            ""rowHeader"" => function ($rowHeader, $headerInfo) {
+                                $v =  $rowHeader;
+                                return $v;
+                            },
+                            ""columnHeader"" => function ($rowHeader, $headerInfo) {
+                                $v = $rowHeader;
+                                if ($v == '1.0 Valor Bruto') {
+                                    $v = 'Valor Bruto';
+                                }
+                                $v =  '<center>' . $v . '</center>';
+                                return $v;
+                            }
+
+                        ),
+                        ""headerMap"" => array(
+                            ""valor_liquido - sum"" => ""<b>Valor</b>""
+                        ),
+
+                        ""rowSort"" => array(
+                            ""grupo1, grupo2"" => ""asc""
+                        )
+
+                    ));
+
+                    ?>
+                </div>
+
+                <div class=""somente-na-impressao"">
+                    Hash de autenticação: <?= $this->ds_hash_autenticacao ?>
+                    <br />
+                    URL de consulta: <?= $this->ds_url_validadora ?>
+                </div>
+
+                <div class=""page-footer no-screen"" style=""overflow: hidden;"">
+                    <div style=""
+                     text-align: right;
+                     padding-left: <?= $ds_margem_esquerda . 'cm' ?>;
+                     padding-right: <?= $ds_margem_direita . 'cm' ?>;
+                     "">
+                        <hr>
+                        {pageNum}/{numPages}
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+    <?php } ?>
+
+</body>
+
+</html>","<?php
+
+require_once ""Relatorio.php"";
+
+$relatorio = new Relatorio;
+
+$relatorio->run()->render();
+","[
+ {
+    ""tipo"": ""campo-data"",
+    ""obrigatorio"": true,
+    ""label"": ""Data inicial"",
+    ""ds_campo"": ""dt_inicio""
+  },
+   {
+    ""tipo"": ""campo-data"",
+    ""obrigatorio"": true,
+    ""label"": ""Data final"",
+      ""ds_campo"": ""dt_fim""
+  },
+   {
+    ""tipo"": ""uni-select-polo"",
+    ""obrigatorio"": false,
+      ""label"": ""Polo"",
+      ""ds_campo"": ""cd_polo""
+   },
+   {
+    ""tipo"": ""uni-select-coligada-filha"",
+    ""obrigatorio"": false,
+      ""label"": ""Unidade"",
+      ""ds_campo"": ""cd_coligada""
+   },
+   {
+    ""tipo"": ""uni-select-departamento"",
+      ""obrigatorio"": false,
+      ""label"": ""Departamento"",
+    ""ds_campo"": ""cd_departamento""
+  },
+   {
+    ""tipo"": ""uni-select-curso"",
+    ""obrigatorio"": false,
+      ""label"": ""Curso"",
+     ""ds_campo"": ""id_curso""
+   },
+   {
+    ""tipo"": ""uni-select-turma"",
+    ""obrigatorio"": false,
+      ""label"": ""Turma"",
+     ""ds_campo"": ""cd_turma""
+   },
+   {
+    ""tipo"": ""uni-busca-pessoa"",
+    ""obrigatorio"": false,
+      ""label"": ""Código aluno"",
+    ""ds_campo"": ""codigoaluno""
+   },
+  {
+    ""tipo"": ""campo-dinamico"",
+      ""obrigatorio"": false,
+      ""label"": ""Tipo de Título"",
+    ""ds_chave"": ""busca-tipo-mensalidade"",
+      ""ds_campo"": ""cd_tipo_titulo""
+   },
+  {
+    ""tipo"": ""campo-dinamico"",
+      ""obrigatorio"": false,
+      ""label"": ""Tipos de Descontos"",
+      ""ds_chave"": ""busca-acoes-descontos"",
+    ""ds_campo"": ""cd_acao_movimento""
+   }
+]
+",46,"INSERT IGNORE INTO rgo_opcoes_tipos (
+								cd_opcao_tipo,
+								ds_opcao_tipo,
+								ds_tag_opcao,
+								dt_base
+						)
+				VALUES (
+								NULL,""Sintético/Analítico"",""sn_sintentico"",""2020-08-03 08:04:02""); 
+INSERT IGNORE INTO rgo_opcoes_tipos (
+								cd_opcao_tipo,
+								ds_opcao_tipo,
+								ds_tag_opcao,
+								dt_base
+						)
+				VALUES (
+								NULL,""Tipo do filtro de data"",""tp_filtro_data"",""2020-08-03 08:04:02""); 
+INSERT IGNORE INTO rgo_opcoes_tipos (
+								cd_opcao_tipo,
+								ds_opcao_tipo,
+								ds_tag_opcao,
+								dt_base
+						)
+				VALUES (
+								NULL,""Agrupamento"",""tp_agrupamento"",""2021-05-18 12:49:14""); 
+INSERT IGNORE INTO rgo_opcoes_tipos (
+								cd_opcao_tipo,
+								ds_opcao_tipo,
+								ds_tag_opcao,
+								dt_base
+						)
+				VALUES (
+								NULL,""Exibe Hash de Autenticação?"",""ex_hash"",""2023-09-27 00:00:00"")","INSERT IGNORE INTO rgo_relatorios (
+		cd_relatorio,
+		cd_tipo,
+		cd_agrupamento,
+		sn_ativo,
+		nm_relatorio,
+		sn_padrao,
+		ds_filtro,
+		nm_arquivo,
+		me_relatorio_index,
+		me_relatorio_config,
+		me_relatorio_view,
+		cd_relatorio_template,
+		cd_formato,
+		me_documentacao_padrao,
+		me_documentacao_cliente,
+		ds_chave,
+		dt_base,
+		sn_autentique,
+		ds_autentique_config
+    )
+		VALUES (
+		NULL,
+		3,8,1,""1.1 Faturamento detalhado Bolsas"",1,
+		NULL,
+		NULL,
+		NULL,
+		NULL,
+		NULL,
+		 NULL,2,""Objetivo:
+
+O relatório de Faturamento tem por objetivo apresentar informações contábeis referente títulos com competência dentro do período de data filtrado.
+
+Para o relatório somente são considerados títulos originais, sendo desconsiderados títulos geradas a partir de pagamentos parciais ou  negociação.
+Somente são considerados títulos ativas ou que tenham sido canceladas após o mês/ano de sua competência.
+ 
+Referente as colunas de valores:
+- Valor Bruto: Soma do valor bruto, mais o valor extra;
+- Valor Bolsas: Soma do valor de desconto fixo aplicado;
+- Valor Liquido: Total entre as duas colunas anteriores."", NULL,""rel_contab_fat_bolsas"",""2023-12-27 16:48:46"",0, NULL)","INSERT IGNORE INTO rgo_opcoes (cd_opcao, cd_relatorio,cd_opcao_tipo,sn_padrao,sn_ativo,ds_opcao,me_configuracao,ds_chave,dt_base)
+VALUES (NULL,NULL,NULL,1,1,""Sintético"",""sintetico"",""rel_contab_fat_bolsas_sintetico"",""2022-03-14 09:14:08""
+ ); 
+INSERT IGNORE INTO rgo_opcoes (cd_opcao, cd_relatorio,cd_opcao_tipo,sn_padrao,sn_ativo,ds_opcao,me_configuracao,ds_chave,dt_base)
+VALUES (NULL,NULL,NULL,0,1,""Analítico"",""analitico"",""rel_contab_fat_bolsas_analitico"",""2022-03-14 09:14:08""
+ ); 
+INSERT IGNORE INTO rgo_opcoes (cd_opcao, cd_relatorio,cd_opcao_tipo,sn_padrao,sn_ativo,ds_opcao,me_configuracao,ds_chave,dt_base)
+VALUES (NULL,NULL,NULL,1,1,""Competência"",""dt_competencia"",""rel_contab_fat_bolsas_filtro_data_comp"",""2022-03-14 09:14:08""
+ ); 
+INSERT IGNORE INTO rgo_opcoes (cd_opcao, cd_relatorio,cd_opcao_tipo,sn_padrao,sn_ativo,ds_opcao,me_configuracao,ds_chave,dt_base)
+VALUES (NULL,NULL,NULL,1,1,""Curso e turma"",""curso_turma"",""rel_contab_fat_bolsas_filtro_grupo_curso_turma"",""2022-03-14 09:14:08""
+ ); 
+INSERT IGNORE INTO rgo_opcoes (cd_opcao, cd_relatorio,cd_opcao_tipo,sn_padrao,sn_ativo,ds_opcao,me_configuracao,ds_chave,dt_base)
+VALUES (NULL,NULL,NULL,0,1,""Curso e Fase"",""curso_fase"",""rel_contab_fat_bolsas_filtro_grupo_curso_fase"",""2022-03-14 09:14:08""
+ ); 
+INSERT IGNORE INTO rgo_opcoes (cd_opcao, cd_relatorio,cd_opcao_tipo,sn_padrao,sn_ativo,ds_opcao,me_configuracao,ds_chave,dt_base)
+VALUES (NULL,NULL,NULL,0,1,""Curso"",""curso"",""rel_contab_fat_bolsas_filtro_grupo_curso"",""2022-03-14 09:14:08""
+ ); 
+INSERT IGNORE INTO rgo_opcoes (cd_opcao, cd_relatorio,cd_opcao_tipo,sn_padrao,sn_ativo,ds_opcao,me_configuracao,ds_chave,dt_base)
+VALUES (NULL,NULL,NULL,0,1,""Centro de Custo"",""centro_custo"",""rel_contab_fat_bolsas_filtro_grupo_centro_custo"",""2022-03-14 09:14:08""
+ ); 
+INSERT IGNORE INTO rgo_opcoes (cd_opcao, cd_relatorio,cd_opcao_tipo,sn_padrao,sn_ativo,ds_opcao,me_configuracao,ds_chave,dt_base)
+VALUES (NULL,NULL,NULL,0,1,""Unidade de Ensino"",""coligada"",""rel_contab_fat_bolsas_filtro_grupo_coligada"",""2022-03-14 09:14:08""
+ ); 
+INSERT IGNORE INTO rgo_opcoes (cd_opcao, cd_relatorio,cd_opcao_tipo,sn_padrao,sn_ativo,ds_opcao,me_configuracao,ds_chave,dt_base)
+VALUES (NULL,NULL,NULL,0,1,""Tipo de Título"",""tipo_titulo"",""rel_contab_fat_bolsas_filtro_grupo_tipo_titulo"",""2022-03-14 09:14:08""
+ ); 
+INSERT IGNORE INTO rgo_opcoes (cd_opcao, cd_relatorio,cd_opcao_tipo,sn_padrao,sn_ativo,ds_opcao,me_configuracao,ds_chave,dt_base)
+VALUES (NULL,NULL,NULL,1,1,""Sim"",""sim"",""rel_contab_fat_bolsas_book_exibe_hash"",""2023-09-27 14:11:23""
+ ); 
+INSERT IGNORE INTO rgo_opcoes (cd_opcao, cd_relatorio,cd_opcao_tipo,sn_padrao,sn_ativo,ds_opcao,me_configuracao,ds_chave,dt_base)
+VALUES (NULL,NULL,NULL,0,1,""Não"",""nao"",""rel_contab_fat_bolsas_book_naoexibe_hash"",""2023-09-27 14:11:23""
+ )",,2770,1438,ASCE - Frasce,"FRASCE, Associação",ASCE - Frasce

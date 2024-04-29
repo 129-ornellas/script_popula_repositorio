@@ -1,0 +1,313 @@
+ds_agrupamento,nm_relatorio,me_relatorio_config,me_relatorio_view,me_relatorio_index,ds_filtro,cd_relatorio,opcao_tipo_impressao,insert_statement,opcoes_impressao,me_config,LENGHT_opcoes_impressao,cd_unicontrole,nome,apelido,nome_tratado
+Acadêmico,Relação de notas parciais,"<?php
+
+   $PARMS = array('PASTA' => join(DIRECTORY_SEPARATOR, array('..', '..', '..', '')), 'SEGURO' => false, 'NO-SESSION' => true);
+   require_once( $PARMS['PASTA'] . 'nucleo.php' );
+   require_once join(DIRECTORY_SEPARATOR, array('..', '..', '..', 'vendor', 'koolreport', 'core',  'autoload.php'));
+   header ('Content-type: text/html; charset=UTF-8');
+
+   use \koolreport\processes\ColumnMeta;
+
+   // classe padrao do relatorio
+   class Relatorio extends \koolreport\KoolReport {
+      use \koolreport\bootstrap4\Theme;
+      use \koolreport\inputs\Bindable;
+      use \koolreport\inputs\POSTBinding;
+      use \koolreport\export\Exportable;
+      use \koolreport\excel\ExcelExportable;
+
+      public $path_include;
+      public $arrDadosFiltro;
+      public $arrDadosGerais;
+
+      public function __construct() {
+
+         try {
+
+            $this->path_include = join(DIRECTORY_SEPARATOR, array('..', '..', '..', 'projetos', 'relatorios', ''));
+            parent::__construct();
+
+         } catch (Exception $e) {
+
+            echo 'Exceção capturada: ',  $e->getMessage(), ""\n"";
+            die;
+
+         }
+
+      }
+
+      // inicializacao dos filtros
+      function defaultParamValues() {
+         return array(
+            ""filtros""=>'{}',
+            ""gerais""=>'{}'
+         );
+      }
+
+      // resgate do $_POST para vinculo com os parametros
+      function bindParamsToInputs() {
+         return array(
+            ""filtros"",
+            ""gerais""
+         );
+      }
+
+      // funcao responsavel por realizar a conexao com o banco de dados
+      // e resgate dos dados tratamento dos dados do $_POST
+      public function settings() {
+
+         Nucleo::import( 'relatorios.RelatoriosConexao' );
+         $objRelatoriosConexao = new RelatoriosConexao;
+
+         return $objRelatoriosConexao->settings();
+
+      }
+
+      // funcao responsavel por manter as consultas a serem executadas pelo relatorio
+      // e geracao dos array de dados para uso posterior na visualizacao
+      public function setup() {
+
+         require_once $this->path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'formatos.php'));
+
+         if (ctype_xdigit($_POST[""filtros""])) {
+            $_POST[""filtros""] = hex2bin($_POST[""filtros""]);
+         }
+
+         if (ctype_xdigit($_POST[""gerais""])) {
+            $_POST[""gerais""] = hex2bin($_POST[""gerais""]);
+         }
+
+         if (isset($_POST['filtros'])) {
+            $this->arrDadosFiltro = json_decode($_POST['filtros']);
+         } else {
+            $this->arrDadosFiltro = json_decode($_POST);
+         }
+
+         if (isset($_POST['gerais'])) {
+            $this->arrDadosGerais = json_decode($_POST['gerais']);
+         }
+
+         $arrParametros = [];
+
+         foreach ($this->arrDadosFiltro as $filtro => $valor) {
+            if (!empty($valor->ds_valor)) {
+                $arrParametros["":"" . $filtro] = $valor->ds_valor;
+            }
+         }
+
+         $this->src('unimestre')->query(
+            ""
+							SELECT 
+								ma.anosemestre AS 'AnoSemestre'
+								,t.descricao AS 'Turma'
+								,dp.bimestre AS 'Trimestre'
+								,d.descricao AS 'Disciplina'
+								,p.nm_pessoa AS 'Nome aluno'								
+								,pf.nm_pessoa AS 'Professor'
+								,av.ds_avaliacao AS 'Tipo Avaliação'
+								,dp.nro_nota AS 'Nº da avaliação'
+								,DATE_FORMAT(dp.data, '%d/%m/%Y') AS 'Data Avaliação'
+								,dp.assunto AS 'Descrição Avaliação'
+								,dp.vl_peso AS 'Peso'
+								,dpa.vl_nota AS 'Nota'
+							FROM
+								matriculas ma
+							INNER JOIN pessoas p ON (ma.codigoaluno = p.cd_pessoa)
+							INNER JOIN turmas t ON (ma.turma = t.codigo and ma.anosemestre = t.anosemestre)
+							INNER JOIN diario_provas dp ON (ma.anosemestre = dp.anosemestre and ma.turma = dp.turma)
+							INNER JOIN diario_provas_alunos dpa ON (ma.codigoaluno = dpa.cd_pessoa and dp.nro_nota = dpa.nr_prova and dp.turma = dpa.cd_turma and dp.anosemestre = dpa.nr_anosem and dp.disciplina = dpa.cd_disciplina and dp.bimestre = dpa.cd_bimestre)
+							LEFT JOIN avaliacoes_tipos av ON (dp.cd_avaliacao_tipo = av.cd_avaliacao_tipo)
+							INNER JOIN disciplinas d ON (ma.curso = d.curso and dp.disciplina = d.codigo)
+							INNER JOIN pessoas pf ON (dp.cd_professor = pf.cd_pessoa)
+							INNER JOIN cursos_mestre cm ON (ma.curso = cm.cd_curso)
+							WHERE 
+								1 = 1
+       
+							"" .
+								 ((!empty($arrParametros["":nr_anosemestre""]))
+										? ""AND ma.anosemestre IN (:nr_anosemestre)""
+										: NULL
+								 )
+							. ""
+							"" .
+								 ((!empty($arrParametros["":id_curso""]))
+										? ""AND cm.ID_CURSO IN (:id_curso)""
+										: NULL
+								 )
+							. ""
+							"" .
+								 ((!empty($arrParametros["":id_disciplina""]))
+										? ""AND d.id_disciplina IN (:id_disciplina)""
+										: NULL
+								 )
+							. ""
+							"" .
+								 ((!empty($arrParametros["":cd_turma""]))
+										? ""AND ma.turma IN (:cd_turma)""
+										: NULL
+								 )
+							. ""
+						  "" .
+                  ((!empty($arrParametros["":cd_aluno""]))
+                     ? ""AND ma.codigoaluno IN (:cd_aluno)""
+                     : NULL
+                  )
+              . ""
+            							
+            ""//Fecha SELECT
+         )//Fecha query
+
+         // aplicacao de filtro a consulta
+         ->params(
+            $arrParametros
+         )
+         // tratamento dos dados do array, sendo feita a aplicacao de mascaras aos dados
+         // para simplificar e melhorar a apresentacao dos dados na visualizacao
+         ->pipe
+				 (            
+						new ColumnMeta(
+               array(
+                  ""AnoSemestre"" => $arrFormatoInteiro,
+									""Trimestre"" => $arrFormatoInteiro,
+									""Nº da avaliação"" => $arrFormatoInteiro,
+									""Peso"" => $arrFormatoInteiro,
+									""Nota"" => $arrFormatoMoeda
+               )
+            )
+         )
+         ->saveTo($consulta);
+        //dump($consulta); //Ariel: Debugar a consulta
+				//die;
+         $consulta->pipe($this->dataStore(""dados_consulta""));
+
+      }
+
+   }
+","<?php
+
+   use \koolreport\datagrid\DataTables;
+
+   // Valores fixos
+   $path_include = join(DIRECTORY_SEPARATOR, array('..', '..', '..', 'projetos', 'relatorios', ''));
+
+?>
+
+<html>
+   <head>
+      <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'dados_head.php')); ?>
+   </head>
+
+   <body class=""listagem"">
+      <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'loader.php')); ?>
+      <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'barra_superior.php')); ?>
+      <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'css.php')); ?>
+
+      <div class=""container-fluid"">
+         <div style=""width:100%"">
+
+            <div style=""padding-left: 15px;padding-right: 15px;"">
+               <?php require_once $path_include . 'imports_padroes/filtro.php'; ?>
+            </div>
+
+            <h3 class=""text-center"" style=""margin: 2rem;""><?=$this->arrDadosGerais->nm_relatorio?></h3>
+
+            <?php
+
+               // componente responsavel pela criacao da tabela do relatorio de listagem
+               DataTables::create(array(
+                  ""language""=>""pt"",
+                  ""name""=> ""tbl_relatorio"",
+                  ""dataSource""=> $this->dataStore(""dados_consulta""),
+                  ""columns""=> json_decode($this->arrDadosGerais->arrOpcoes->layout_impressao->me_configuracao)[0]->campos_disponiveis,
+                  ""options""=> array(
+                     ""searching""=> true,
+                     ""paging""=> true,
+                     ""colReorder""=> true,
+                     ""order""=>array(
+                        array(1,""asc""),
+                        array(2,""asc""),
+												array(3,""asc""),
+												array(4,""asc"")
+                     ),
+                  ),
+                  ""cssClass""=>array(
+                     ""table""=>""table table-sm table-complete table-striped table-hover"",
+                     ""tr""=>"""",
+                     ""th""=>"""",
+                     ""td""=>"""",
+                     ""tf""=>"""",
+                  )
+               ));
+
+            ?>
+         </div>
+      </div>
+
+   </body>
+</html>","<?php
+
+require_once ""Relatorio.php"";
+
+$relatorio = new Relatorio;
+
+$relatorio->run()->render();","[
+	{
+		""tipo"": ""campo-anosemestre"",
+		""obrigatorio"": true,
+		""label"": ""Anosemestre"",
+		""ds_campo"": ""nr_anosemestre""
+	},
+	{
+		""tipo"": ""uni-select-curso"",
+		""obrigatorio"": false,
+		""label"": ""Curso"",
+		""ds_campo"": ""id_curso""
+	},
+	{
+		""tipo"": ""uni-busca-turma"",
+		""obrigatorio"": false,
+		""label"": ""Turma"",
+		""ds_campo"": ""cd_turma""
+	},
+	{
+   ""tipo"":""uni-busca-disciplina"",
+   ""obrigatorio"":false,
+   ""label"":""Disciplina"",
+   ""ds_campo"":""id_disciplina""
+	},
+	{
+		""tipo"": ""uni-busca-pessoa"",
+		""obrigatorio"": false,
+		""label"": ""Aluno"",
+		""ds_campo"": ""cd_aluno""
+	}
+]",19,,"INSERT IGNORE INTO rgo_relatorios (
+		cd_relatorio,
+		cd_tipo,
+		cd_agrupamento,
+		sn_ativo,
+		nm_relatorio,
+		sn_padrao,
+		ds_filtro,
+		nm_arquivo,
+		me_relatorio_index,
+		me_relatorio_config,
+		me_relatorio_view,
+		cd_relatorio_template,
+		cd_formato,
+		me_documentacao_padrao,
+		me_documentacao_cliente,
+		ds_chave,
+		dt_base,
+		sn_autentique,
+		ds_autentique_config
+    )
+		VALUES (
+		NULL,
+		2,4,1,""Relação de notas parciais"",0,
+		NULL,
+		NULL,
+		NULL,
+		NULL,
+		NULL,
+		 NULL, NULL, NULL, NULL, NULL,""2024-01-03 10:53:05"",0, NULL)",,,,1392,Escola Internacional de Joinville,"Internacional EIJ, Escola",Escola Internacional de Joinville

@@ -1,0 +1,1548 @@
+ds_agrupamento,nm_relatorio,me_relatorio_config,me_relatorio_view,me_relatorio_index,ds_filtro,cd_relatorio,opcao_tipo_impressao,insert_statement,opcoes_impressao,me_config,LENGHT_opcoes_impressao,cd_unicontrole,nome,apelido,nome_tratado
+Acadêmico,Certificado Pós-Graduação,"<?php
+
+$PARMS = array('PASTA' => join(DIRECTORY_SEPARATOR, array('..', '..', '..', '')), 'SEGURO' => false, 'NO-SESSION' => true);
+require_once($PARMS['PASTA'] . 'nucleo.php');
+require_once join(DIRECTORY_SEPARATOR, array('..', '..', '..', 'vendor', 'koolreport', 'core',  'autoload.php'));
+header('Content-type: text/html; charset=UTF-8');
+
+use \koolreport\processes\ColumnMeta;
+use \koolreport\processes\Group;
+use \koolreport\processes\OnlyColumn;
+use \koolreport\processes\Sort;
+
+// classe padrao do relatorio
+class Relatorio extends \koolreport\KoolReport
+{
+   use \koolreport\bootstrap4\Theme;
+   use \koolreport\inputs\Bindable;
+   use \koolreport\inputs\POSTBinding;
+   use \koolreport\export\Exportable;
+
+   public $path_include;
+   public $arrDadosFiltro;
+   public $arrDadosGerais;
+
+   public function __construct()
+   {
+
+      try {
+
+         $this->path_include = join(DIRECTORY_SEPARATOR, array('..', '..', '..', 'projetos', 'relatorios', ''));
+         parent::__construct();
+      } catch (Exception $e) {
+
+         echo 'Exceção capturada: ',  $e->getMessage(), ""\n"";
+         die;
+      }
+   }
+
+   // inicializacao dos filtros
+   function defaultParamValues()
+   {
+      return array(
+         ""filtros"" => '{}',
+         ""gerais"" => '{}'
+      );
+   }
+
+   // resgate do $_POST para vinculo com os parametros
+   function bindParamsToInputs()
+   {
+      return array(
+         ""filtros"",
+         ""gerais""
+      );
+   }
+
+   // funcao responsavel por realizar a conexao com o banco de dados
+   // e resgate dos dados tratamento dos dados do $_POST
+   public function settings()
+   {
+
+      Nucleo::import('relatorios.RelatoriosConexao');
+      $objRelatoriosConexao = new RelatoriosConexao;
+
+      return $objRelatoriosConexao->settings();
+   }
+
+   // funcao responsavel por manter as consultas a serem executadas pelo relatorio
+   // e geracao dos array de dados para uso posterior na visualizacao
+   public function setup()
+   {
+
+      require_once $this->path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'formatos.php'));
+
+      if (isset($_POST['filtros'])) {
+         $this->arrDadosFiltro = json_decode($_POST['filtros']);
+      } else {
+         $this->arrDadosFiltro = json_decode($_POST);
+      }
+
+      if (isset($_POST['gerais'])) {
+         $this->arrDadosGerais = json_decode($_POST['gerais']);
+      }
+
+      $arrParametros = [];
+
+      foreach ($this->arrDadosFiltro as $filtro => $valor) {
+         if (!empty($valor->ds_valor)) {
+            $arrParametros["":"" . $filtro] = $valor->ds_valor;
+         }
+      }
+
+      $this->src('unimestre')->query(
+         "" 
+            SELECT
+               mat.turma AS cod_turma
+            , 	pe.nm_pessoa AS nm_aluno
+            , 	pe.cd_pessoa AS cod_aluno
+            ,  est.ds_estado AS ds_estado_nasc
+            ,  pe.ds_identidade AS ds_rg_aluno
+            ,	CONCAT(MID(pe.ds_cpf,1,3),'.',MID(pe.ds_cpf,4,3),'.',MID(pe.ds_cpf,7,3),'-',MID(pe.ds_cpf,10,2)) AS ds_cpf
+            ,  IF(pe.ds_identidade_orgao_exp IS NULL OR pe.ds_identidade_orgao_exp = '','','/') AS ds_barra
+            ,  pe.ds_identidade_orgao_exp AS ds_orgao_exp
+            ,	disc.codigo AS cod_disciplina
+            , 	disc.descricao AS ds_disciplina
+            ,  DATE_FORMAT(pe.dt_nascimento, '%d/%m/%Y') AS dt_nasc_aluno
+            , 	IFNULL(ih.ds_conceito, ' ') AS ds_conceito
+            ,	pe_prof_t.nm_pessoa AS nm_prof_t
+            , 	mt_t.ds_tratamento AS ds_tit_prof_t
+            ,	cm.CD_CURSO AS cod_curso
+            ,  IF(pe.ds_sexo = 'F','a','o') AS a_o_aluno
+            , 	cm.DS_CURSO AS ds_curso
+            , 	mat.anosemestre AS nr_anosemestre
+            , 	IFNULL(mc.nr_cert_registro, ' ') AS nr_cert_reg
+            , 	IFNULL(cl.nm_livro, ' ') AS nm_livro
+            , 	prof_t.CD_PESSOA AS cod_prof_t
+            , 	prof_f.CD_PESSOA AS cod_prof_f
+            ,	pe_prof_f.nm_pessoa AS nm_prof_f
+            ,  IFNULL(IFNULL(pe_prof_f.nm_pessoa, pe_prof_t.nm_pessoa), ' ') AS nm_professor
+            ,	mt_f.ds_tratamento AS ds_tit_prof_f
+            ,  IFNULL(IF(pe_prof_f.cd_pessoa IS NULL, mt_t.ds_tratamento, mt_f.ds_tratamento), ' ') AS ds_tratamento
+            , 	IFNULL(ih.vl_ch, 0) AS nr_ch
+            , 	ih.vl_ch AS ch_pra_somar
+            ,  ih.vl_freq
+            ,  ih.mediaFinal as media
+            ,  IFNULL(ih.ds_conceito, 'Z') AS ds_conceito_ordem
+            ,  DATE_FORMAT(mc.dt_ingresso, '%d/%m/%Y') AS dt_ingresso
+            ,  DATE_FORMAT(mono.dt_solicitacao_certificado, '%d/%m/%Y') AS dt_solicitacao_cert
+            ,  ac.ds_conteudo AS ds_area_conhecimento
+            ,  IFNULL(mono.DS_TEMA_HTML, ' ') AS ds_tema_mono
+            ,  IFNULL(mono.ds_nota_conceito, ' ') AS ds_nota_conceito
+            ,  CONCAT(
+               DATE_FORMAT(NOW(),'%d'),
+               ' de ',
+               CASE MONTH(NOW())
+                  WHEN 1 THEN 'Janeiro'
+                  WHEN 2 THEN 'Fevereiro'
+                  WHEN 3 THEN 'Março'
+                  WHEN 4 THEN 'Abril'
+                  WHEN 5 THEN 'Maio'
+                  WHEN 6 THEN 'Junho'
+                  WHEN 7 THEN 'Julho'
+                  WHEN 8 THEN 'Agosto'
+                  WHEN 9 THEN 'Setembro'
+                  WHEN 10 THEN 'Outubro'
+                  WHEN 11 THEN 'Novembro'
+                  WHEN 12 THEN 'Dezembro'
+               END,
+               ' de ',
+               YEAR(NOW())
+            ) AS dt_atual
+            FROM 
+               matriculas mat
+            INNER JOIN 
+               pessoas pe ON (
+                  mat.codigoaluno = pe.cd_pessoa
+               )
+            INNER JOIN 
+               imp_historico ih ON (
+                  mat.codigoaluno = ih.cd_pessoa AND 
+                  mat.curso = ih.cd_curso
+               )
+            INNER JOIN 
+               matriculas_curso mc ON (
+                  mat.cd_matricula_curso = mc.cd_matricula_curso
+               )
+            LEFT JOIN 
+               turmasprofessores tp_t ON (
+                  mat.turma = tp_t.turma AND 
+                  ih.cd_disciplina = tp_t.disciplina
+               )
+            LEFT JOIN 
+               certificado_livros cl ON (
+                  mc.cd_cert_livro = cl.cd_cert_livro
+               )
+            LEFT JOIN 
+               pessoas pe_prof_t ON (
+                  tp_t.professor = pe_prof_t.cd_pessoa
+               )
+            LEFT JOIN 
+               professores prof_t ON (
+                  pe_prof_t.cd_pessoa = prof_t.CD_PESSOA
+               )
+            LEFT JOIN 
+               mec_titulacoes mt_t ON (
+                  prof_t.cd_titulacao = mt_t.cd_titulacao
+               )
+            INNER JOIN 
+               disciplinas disc ON (
+                  ih.cd_disciplina = disc.codigo AND 
+                  ih.cd_curso = disc.curso
+               )
+            INNER JOIN 
+               cursos_mestre cm ON (
+                  ih.cd_curso = cm.CD_CURSO
+               )
+            LEFT JOIN 
+               turmasprofessores tp_f ON (
+                  ih.cd_turma = tp_f.turma AND 
+                  ih.cd_disciplina = tp_f.disciplina AND 
+                  ih.nr_anosem = tp_f.anosemestre
+               )
+            LEFT JOIN 
+               pessoas pe_prof_f ON (
+                  tp_f.professor = pe_prof_f.cd_pessoa
+               )
+            LEFT JOIN 
+               professores prof_f ON (
+                  pe_prof_f.cd_pessoa = prof_f.CD_PESSOA
+               )
+            LEFT JOIN 
+               mec_titulacoes mt_f ON (
+                  prof_f.cd_titulacao = mt_f.cd_titulacao
+               )
+            LEFT JOIN
+               monografias mono ON (
+                  mono.cd_pessoa = mc.cd_pessoa AND
+                  mono.cd_curso = mc.cd_curso
+               )
+            LEFT JOIN
+               cursos_turmas_cadastro ac ON (
+                  ac.cd_curso = mat.curso AND
+                  ac.cd_campo = 18
+               )
+            LEFT JOIN
+               estados est ON (
+                  est.ds_uf = pe.ds_estado_nascimento
+               )
+            WHERE 
+               1 = 1
+            "" .
+               ((!empty($arrParametros["":id_curso""]))
+                  ? ""AND cm.ID_CURSO IN (:id_curso)""
+                  : NULL
+               )
+            . ""   
+            "" .
+               ((!empty($arrParametros["":cd_turma""]))
+                  ? ""AND mat.turma IN (:cd_turma)""
+                  : NULL
+               )
+            . ""
+            "" .
+               ((!empty($arrParametros["":cd_aluno""]))
+                  ? ""AND mat.codigoaluno IN (:cd_aluno)""
+                  : NULL
+               )
+            . ""
+         ""
+      )
+      // aplicacao de filtro a consulta
+      ->params(
+         $arrParametros
+      )
+      // tratamento dos dados do array, sendo feita a aplicacao de mascaras aos dados
+      // para simplificar e melhorar a apresentacao dos dados na visualizacao
+      ->pipe(
+         new ColumnMeta(
+            array(
+               ""cod_aluno"" => $arrFormatoInteiro
+            )
+         )
+      )
+      ->saveTo($consulta);
+
+      // criacao do primeiro dataStore para uso com o componente de tabela na visualizacao
+      $consulta->pipe($this->dataStore(""dados_consulta""));
+
+      $consulta->pipe(new Group(array(
+         ""by"" => array(
+            ""cod_aluno"",
+            ""cod_turma"",
+            ""cod_curso""
+         )
+      )))
+      ->pipe(new OnlyColumn(array(
+         ""cod_aluno"",
+         ""cod_turma"",
+         ""cod_curso""
+      )))
+      ->pipe(new Sort(array(
+         ""ds_curso""=>""asc"",
+         ""nm_aluno""=>""asc"",
+         ""ds_conceito_ordem""=>""asc""
+      )))
+      ->pipe($this->dataStore(""dados_consulta_agrupado""));
+
+      $this->src('unimestre')->query(
+         ""
+            SELECT
+               us.cd_pessoa AS cod_usuario
+            ,  us.nm_pessoa AS nm_usuario
+            ,  IFNULL(rl.ds_chave,'------') AS ds_chave_rel
+            FROM
+               pessoas us
+            INNER JOIN
+               rgo_logs_impressoes rli ON (rli.cd_pessoa = us.cd_pessoa)
+            INNER JOIN
+               rgo_relatorios rl ON (rl.cd_relatorio = rli.cd_relatorio)
+            WHERE
+               rli.cd_relatorio = "" . $this->arrDadosGerais->cd_relatorio . ""
+            ORDER BY
+               rli.dt_impressao DESC
+            LIMIT 1
+         ""
+      )
+      ->saveTo($dados_footer);
+
+      $dados_footer->pipe($this->dataStore(""dados_rodape""));
+   
+require_once $this->path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'consulta_cabecalho.php'));	
+   }
+}","<?php
+
+use \koolreport\widgets\koolphp\Table;
+use \koolreport\processes\Filter;
+
+// path pasta
+$path_include = join(DIRECTORY_SEPARATOR, array('..', '..', '..', 'projetos', 'relatorios', ''));
+
+// margens
+$ds_margem_superior = $this->arrDadosGerais->arrFormato->ds_margem_superior;
+$ds_margem_inferior = $this->arrDadosGerais->arrFormato->ds_margem_inferior;
+$ds_margem_esquerda = $this->arrDadosGerais->arrFormato->ds_margem_esquerda;
+$ds_margem_direita = $this->arrDadosGerais->arrFormato->ds_margem_direita;
+
+$sn_geracao = $_POST[""pdf""];
+
+//usuario impressao
+$usuario = $this->dataStore(""dados_rodape"")[0][""nm_usuario""];
+
+//chave relatorio
+$chave_relatorio = $this->dataStore(""dados_rodape"")[0][""ds_chave_rel""];
+
+?>
+
+<html>
+   <head>
+      <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'dados_head.php')); ?>
+
+      <link rel=""preconnect"" href=""https://fonts.googleapis.com"">
+      <link rel=""preconnect"" href=""https://fonts.gstatic.com"" crossorigin>
+      <link href=""https://fonts.googleapis.com/css2?family=Italianno&display=swap"" rel=""stylesheet"">
+
+      <style type=""text/css"">
+
+         @page {
+            sheet-size: 210mm 297mm;
+         }
+         ul li {
+            font-size: 11px !important;
+         }
+         .rodape {
+            font-size: 9px !important;
+         }
+         .b {
+            font-weight: bold !important;
+         }
+         .i {
+            font-style: italic !important;
+         }
+         .fonte {
+            font-size: 11px !important;
+         }
+         .titulo {
+            font-size: 18px !important;
+         }
+         .titulo_2 {
+            font-size: 14px !important;
+         }
+         .fonte_cert {
+            font-family: 'Italianno', cursive !important;
+         }
+      </style>
+
+   </head>
+
+   <body class=""relatorio"">
+      <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'loader.php')); ?>
+      <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'barra_superior.php')); ?>
+      <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'css.php')); ?>
+
+      <?php
+
+         foreach ($this->dataStore(""dados_consulta_agrupado"") as $visualizacao) {
+
+            $dados_pagina = $this->dataStore(""dados_consulta"")
+               ->filter(
+                  ""cod_aluno"",""="",$visualizacao[""cod_aluno""]
+               )
+               ->filter(
+                  ""cod_turma"",""="",$visualizacao[""cod_turma""]
+               )
+               ->filter(
+                  ""cod_curso"",""="",$visualizacao[""cod_curso""]
+               );
+
+      ?>
+
+            <div class=""container"">
+               <div class=""conteudo"" style=""
+                  padding-top: <?= ((!$sn_geracao) ? $ds_margem_superior : 0) . 'cm' ?>;
+                  padding-bottom: <?= ((!$sn_geracao) ? $ds_margem_inferior : 0) . 'cm' ?>;
+                  padding-left: <?= $ds_margem_esquerda . 'cm' ?>;
+                  padding-right: <?= $ds_margem_direita . 'cm' ?>;
+               "">
+
+            <?php
+
+               if ($this->arrDadosGerais->arrOpcoes->frente_ou_verso->me_configuracao == 'frente') {
+
+            ?>
+
+                  <table class=""table border-0"">
+                     <tbody>
+                        <tr>
+                           <td style=""font-size: 22px !important; line-height: 100%;"" class=""fonte_cert text-center border-0 b"">
+                              
+                           </td>
+                        </tr>
+                     </tbody>
+                  </table>
+
+                  <table class=""table border-0"">
+                     <tbody>
+                        <tr>
+                           <td style=""font-size: 50px !important;"" class=""fonte_cert text-center border-0"">
+                              CERTIFICADO
+                           </td>
+                        </tr>
+                     </tbody>
+                  </table>
+
+                  <table class=""table border-0 mb-3"" style=""width: 80% !important; margin-right: auto; margin-left: auto;"">
+                     <tbody>
+                        <tr>
+                           <td style=""font-size: 36px !important;"" class=""fonte_cert text-justify border-0"">
+                              Certificamos que <span class=""b fonte_cert"" style=""font-size: 36px !important;""><?= $dados_pagina[0]['nm_aluno'] ?></span>, natural do Estado <?= $dados_pagina[0]['ds_estado_nasc'] ?>, nascid<?= $dados_pagina[0]['a_o_aluno'] ?> em <?= $dados_pagina[0]['dt_nasc_aluno'] ?>, R.G. <?= $dados_pagina[0]['ds_rg_aluno'] ?><?= $dados_pagina[0]['ds_barra'] ?><?= $dados_pagina[0]['ds_orgao_exp'] ?>, concluiu o <span class=""b fonte_cert"" style=""font-size: 36px !important;"">Curso de <?= $dados_pagina[0]['ds_curso'] ?></span> 
+                           </td>
+                        </tr>
+                     </tbody>
+                  </table>
+
+                  <table class=""table border-0"">
+                     <tbody>
+                        <tr>
+                           <td class=""text-center fonte_cert border-0"" style=""font-size: 36px !important;"">
+                               <?= $dados_pagina[0]['dt_atual'] ?>
+                           </td>
+                        </tr>
+                     </tbody>
+                  </table>
+
+                  <table class=""table border-0"">
+                     <tbody>
+                        <tr>
+                           <td style=""width: 60% !important; font-size: 36px !important;"" class=""text-center fonte_cert border-0"">
+                              <?= $dados_pagina[0]['nm_aluno'] ?>
+                           </td>
+                           <td style=""width: 40% !important; font-size: 36px !important;"" class=""text-center fonte_cert border-0"">
+                           </td>
+                        </tr>
+                     </tbody>
+                  </table>
+
+            <?php
+            
+               } else {
+
+            ?>
+
+                  <table class=""table border border-dark"">
+                     <tbody>
+                        <tr>
+                           <td style=""width:65%;"" class=""p-1 fonte border border-dark"">
+                              Aluno(a):<span class=""fonte b""> <?= $dados_pagina[0]['nm_aluno'] ?></span>
+                           </td>
+                           <td style=""width:35%;"" class=""p-1 fonte border border-dark"" style=""text-align: right;"">
+                              CPF:<span class=""fonte b""> <?= $dados_pagina[0]['ds_cpf'] ?></span>
+                           </td>
+                        </tr>
+                        <tr>
+                           <td style=""width:65%;"" class=""p-1 fonte border border-dark"">
+                              Curso:<span class=""fonte b""> <?= $dados_pagina[0]['ds_curso'] ?></span>
+                           </td>
+                           <td style=""width:35%;"" class=""p-1 fonte border border-dark"" style=""text-align: right;"">
+                              Área de Conhecimento (CAPES / CNPQ):<span class=""fonte b""> <?= $dados_pagina[0]['ds_cpf'] ?></span>
+                           </td>
+                        </tr>
+                     </tbody>
+                  </table>
+
+                  <?php
+
+                     // componente responsavel pela criacao da tabela de dados
+                     Table::create(array(
+                        ""dataSource""=> $dados_pagina,
+                        ""grouping""=> array(
+                           ""cod_curso""=> array(
+                              ""top""=> ""<td style='width: 50%;' class='fonte px-1 py-0 border border-dark b align-middle text-center'>Módulo</td>
+                              <td style='width: 8%;' class='fonte px-1 py-0 border border-dark b align-middle text-center'>Carga Horária(hora/aula)</td>
+                              <td style='width: 5%;' class='fonte px-1 py-0 border border-dark b align-middle text-center'>Frequência</td>
+                              <td style='width: 5%;' class='fonte px-1 py-0 border border-dark b align-middle text-center'>Nota</td>
+                              <td style='width: 27%;' class='fonte px-1 py-0 border border-dark b align-middle text-center'>Docente</td>"",
+                              ""bottom""=> """"
+                           )
+                        ),
+                        ""showHeader""=>false,
+                        ""columns""=> array(
+                           ""ds_disciplina"" => array(
+                              ""cssStyle""=> ""text-align: left;""
+                           ),
+                           ""nr_ch"" => array(
+                              ""cssStyle""=> ""text-align: center""
+                           ),
+                           ""vl_freq"" => array(
+                              ""cssStyle""=> ""text-align: center""
+                           ),
+                           ""media"" => array(
+                              ""cssStyle""=> ""text-align: center""
+                           ),
+                           ""nm_professor"" => array(
+                              ""cssStyle""=> ""text-align: left""
+                           )
+                        ),
+                        ""cssClass""=>array(
+                           ""table""=>""table table-hover fonte px-1 border border-dark table-striped"",
+                           ""tr""=>""fonte px-1 py-0 border border-dark align-middle"",
+                           ""th""=>""fonte px-1 py-0 border border-dark align-middle"",
+                           ""td""=>""fonte px-1 py-0 border border-dark align-middle"",
+                           ""tf""=>""fonte px-1 py-0 border border-dark align-middle"",
+                        ),
+                        ""sorting""=> array(
+                           ""ds_conceito_ordem""=> ""asc""
+                        )
+                     ));
+
+                  ?>
+                  
+                  <table style=""width: 100% !important;"">
+                     <tbody>
+                        <tr>
+                           <td class=""p-2 fonte align-top border border-dark"" style=""min-height: 30px; width: 33%;"">
+                              Trabalho de Conclusão de Curso:<span class=""fonte b""> <?= $dados_pagina[0]['ds_tema_mono'] ?></span>
+                           </td>
+                        </tr>
+                     </tbody>
+                  </table>
+
+                  <table style=""width: 100% !important;"">
+                     <tbody>
+                        <tr>
+                           <td class=""p-2 fonte align-top border border-dark"" style=""min-height: 30px; width: 33%;"">
+                              Site de Validação Aluno(a):<span class=""fonte b""> </span>
+                           </td>
+                        </tr>
+                     </tbody>
+                  </table>
+
+            <?php
+
+               }
+
+            ?>
+
+               </div>
+
+               <div class=""page-break"" style=""page-break-after: always;""></div>
+
+            </div>
+      <?php
+
+         } // fim do foreach
+
+      ?>
+
+   </body>
+
+</html>","<?php
+
+
+require_once ""Relatorio.php"";
+
+$relatorio = new Relatorio;
+
+$relatorio->run()->render();","[
+	{
+		""tipo"": ""uni-select-curso"",
+		""obrigatorio"": false,
+		""label"": ""Curso"",
+		""ds_campo"": ""id_curso""
+	},
+	{
+		""tipo"": ""uni-busca-turma"",
+		""obrigatorio"": false,
+		""label"": ""Turma"",
+		""ds_campo"": ""cd_turma""
+	},
+	{
+		""tipo"": ""uni-busca-pessoa"",
+		""obrigatorio"": false,
+		""label"": ""Aluno"",
+		""ds_campo"": ""cd_aluno""
+	}
+]",61,,"INSERT IGNORE INTO rgo_relatorios (
+		cd_relatorio,
+		cd_tipo,
+		cd_agrupamento,
+		sn_ativo,
+		nm_relatorio,
+		sn_padrao,
+		ds_filtro,
+		nm_arquivo,
+		me_relatorio_index,
+		me_relatorio_config,
+		me_relatorio_view,
+		cd_relatorio_template,
+		cd_formato,
+		me_documentacao_padrao,
+		me_documentacao_cliente,
+		ds_chave,
+		dt_base,
+		sn_autentique,
+		ds_autentique_config
+    )
+		VALUES (
+		NULL,
+		3,6,1,""Certificado Pós-Graduação"",0,
+		NULL,
+		NULL,
+		NULL,
+		NULL,
+		NULL,
+		 NULL, NULL, NULL, NULL, NULL,""2024-03-28 13:59:15"",0, NULL)",,,,350,Escola de Negócios Sustentare,"Sustentare, Escola de Negócios",Escola de Negócios Sustentare
+Acadêmico,Certificado de Conclusão de Pós Graduação	,"<?php
+$PARMS = array('PASTA' => join(DIRECTORY_SEPARATOR, array('..', '..', '..', '')), 'SEGURO' => false, 'NO-SESSION' => true);
+require_once($PARMS['PASTA'] . 'nucleo.php');
+require_once join(DIRECTORY_SEPARATOR, array('..', '..', '..', 'vendor', 'koolreport', 'core',  'autoload.php'));
+header('Content-type: text/html; charset=UTF-8');
+
+use \koolreport\processes\ColumnMeta;
+use \koolreport\processes\Group;	
+use \koolreport\processes\OnlyColumn;
+
+// classe padrao do relatorio
+class Relatorio extends \koolreport\KoolReport
+{
+      use \koolreport\bootstrap4\Theme;
+      use \koolreport\inputs\Bindable;
+      use \koolreport\inputs\POSTBinding;
+      use \koolreport\cloudexport\Exportable;
+
+      const C_SN_CLOUD_EXPORT = true;
+
+    public $path_include;
+    public $arrDadosFiltro;
+    public $arrDadosGerais;
+   public $sn_autenticado = true;
+
+    public function __construct()
+    {
+        try {
+            $this->path_include = join(DIRECTORY_SEPARATOR, array('..', '..', '..', 'projetos', 'relatorios', ''));
+            parent::__construct();
+        } catch (Exception $e) {
+            echo 'Exceção capturada: ',  $e->getMessage(), ""\n"";
+            die;
+        }
+    }
+
+    // inicializacao dos filtros
+    function defaultParamValues()
+    {
+        return array(
+            ""filtros"" => '{}',
+            ""gerais"" => '{}'
+        );
+    }
+
+    // resgate do $_POST para vinculo com os parametros
+    function bindParamsToInputs()
+    {
+        return array(
+            ""filtros"",
+            ""gerais""
+        );
+    }
+
+    // funcao responsavel por realizar a conexao com o banco de dados
+    // e resgate dos dados tratamento dos dados do $_POST
+    public function settings()
+    {
+        Nucleo::import('relatorios.RelatoriosConexao');
+        $objRelatoriosConexao = new RelatoriosConexao;
+
+        return $objRelatoriosConexao->settings();
+    }
+
+    // funcao responsavel por manter as consultas a serem executadas pelo relatorio
+    // e geracao dos array de dados para uso posterior na visualizacao
+    public function setup()
+    {
+        require_once $this->path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'formatos.php'));
+
+        if (isset($_POST['filtros'])) {
+            $this->arrDadosFiltro = json_decode($_POST['filtros']);
+        } else {
+            $this->arrDadosFiltro = json_decode($_POST);
+        }
+
+        if (isset($_POST['gerais'])) {
+            $this->arrDadosGerais = json_decode($_POST['gerais']);
+        }
+
+        $arrParametros = [];
+
+        foreach ($this->arrDadosFiltro as $filtro => $valor) {
+            if (!empty($valor->ds_valor)) {
+                $arrParametros["":"" . $filtro] = $valor->ds_valor;
+            }
+        }
+
+        $this->src('unimestre')->query(
+			""
+        SELECT GET_CH_GERAL_ALUNO (ih.cd_pessoa, ih.curso_matric_curso) AS ch_alu,
+                IFNULL(
+                    GET_CH_GRADE ('RHAGIL', grades_disc.CD_GRADE),
+                    GET_CH_GERAL_ALUNO (ih.cd_pessoa, ih.curso_matric_curso)
+                ) AS ch_grade,
+                ih.cd_pessoa AS cd_pessoa,
+                PROPERCASE (al.nm_pessoa) AS nm_aluno,
+                DATE_FORMAT(al.dt_nascimento, '%d/%m/%Y') AS dt_nasc,
+                al.ds_estado_nascimento AS ds_est_nasc,
+                PROPERCASE (al.ds_cidade_nascimento) AS ds_cidade_nasc,
+                PROPERCASE (al.ds_nacionalidade) ds_nacionalidade,
+                al.ds_identidade,
+                FORMATA_CPF(al.ds_cpf) AS cpf,
+                IF(al.ds_sexo = 'M', 'o', 'a') as a_o,
+                al.ds_identidade_orgao_exp,
+                COALESCE (
+                    CONCAT(
+                        PROPERCASE (al.nm_mae),
+                        '/',
+                        PROPERCASE (al.nm_pai)
+                    ),
+                    PROPERCASE (al.nm_mae),
+                    PROPERCASE (al.nm_pai)
+                ) AS filiacao,
+                # CURSO
+                cm.CD_CURSO AS cd_curso,
+                cm.DS_CURSO AS ds_curso,
+                cm.DS_HABILITACAO AS ds_habilitacao,
+                DATE_FORMAT(turmas_principal.datainicio, '%d/%m/%Y') AS t_dt_ini,
+                DATE_FORMAT(turmas_principal.datafim, '%d/%m/%Y') AS t_dt_fim,
+                #Agrupamento
+                CONCAT(ih.cd_pessoa, mc.cd_curso) AS grupo_1,
+                # DISCIPLINAS
+                disc.descricao AS ds_disciplina,
+                GET_CH_GRADE (mc.cd_curso, ih.cd_grade) AS vl_ch,
+                (
+                    SELECT ctc.ds_conteudo
+                    FROM cursos_turmas_cadastro ctc
+                    WHERE ctc.cd_curso = mc.cd_curso
+                        AND ctc.cd_campo = 2
+                    LIMIT 1
+                ) AS c_area,
+				
+				CONCAT(CASE 
+				WHEN pt.cd_titulacao = 1 THEN
+				IF(professor_pes.ds_sexo = 'F', 'Dr. Wilmar Audye Cidral - Colaboradora ', 'Dr. Wilmar Audye Cidral - Colaborador ')
+			    WHEN pt.cd_titulacao = 2 OR pt.cd_titulacao = 5 THEN
+				IF(professor_pes.ds_sexo = 'F', 'Drª. ', 'Dr. ')
+				WHEN pt.cd_titulacao = 3 THEN 
+				'MSc. ' 
+				WHEN pt.cd_titulacao = 4 THEN 
+				'Esp. ' 
+				ELSE
+				'-'
+				END, CAST(professor_pes.nm_pessoa AS CHAR)) AS prof_tit,
+				
+                COALESCE (ih.ch, 0) AS nr_ch,
+                ih.frequencia AS ds_freq,
+                FORMAT(ih.mediaFinal, 1, 'de_DE') AS ds_media,
+                (
+                    SELECT mono.ds_observacao
+                    FROM monografias mono
+                    WHERE mono.cd_pessoa = mc.cd_pessoa
+                    LIMIT 1
+                ) AS tit_tcc,
+                CONCAT(
+                    '<p class=''font_minus'', style=''font-weight:bold''>',
+                    'Sustentare Escola de Negócios',
+                    '</p>',
+                    '<b class=''font_minus'', style=''font-weight:bold''>',
+                    'O certificado consta no Registro:',
+                    '</b> ',
+                    IFNULL(mc.nr_cert_registro, '-'),
+                    '<b class=''font_minus'', style=''font-weight:bold''>',
+                    ', Livro:',
+                    '</b> ',
+                    IFNULL(livro.nm_livro, '-'),
+                    '<b class=''font_minus'', style=''font-weight:bold''>',
+                    ', Folha:',
+                    '</b> ',
+                    IFNULL(mc.nr_cert_folha, '-'),
+                    '<br>',
+                    '<b class=''font_minus'', style=''font-weight:bold''>',
+                    'Data de Registro:'
+                    '</b> ',
+                    IFNULL(
+                        DATE_FORMAT(mc.dt_certificado, '%d/%m/%Y'),
+                        '-'
+                    )
+                ) AS reg_cert,
+                tp.professor,
+                tp.disciplina,
+                CONCAT(
+					'Joinville, ',
+                    
+                    DATE_FORMAT(CURDATE(), '%d'),
+                    ' de ',
+                    GET_TRADUZ_MES(DATE_FORMAT(CURDATE(), '%M')),
+                    ' de ',
+                    DATE_FORMAT(CURDATE(), '%Y')
+                ) as dt_impress, tp.turma
+                                
+                FROM
+                    imp_historico_nova ih
+                    INNER JOIN cursos_mestre cm ON (ih.curso_matric_curso = cm.CD_CURSO)
+                    INNER JOIN disciplinas disc ON (
+                        ih.curso_ficha = disc.curso
+                        AND ih.disciplina = disc.codigo
+                    )
+                    INNER JOIN pessoas al ON (ih.cd_pessoa = al.cd_pessoa)
+                    INNER JOIN matriculas_curso mc ON (
+                        ih.curso_matric_curso = mc.cd_curso
+                        AND al.cd_pessoa = mc.cd_pessoa
+                    )
+                    INNER JOIN situacao sit ON (ih.situacao = sit.cd_situacao)
+                    INNER JOIN turmas tu ON (
+                        ih.turma = tu.codigo
+                        AND ih.curso_ficha = tu.curso
+                    )
+                    LEFT OUTER JOIN historico_obs h_obs ON (
+                        ih.curso_matric_curso = h_obs.curso
+                        AND ih.cd_pessoa = h_obs.codigoaluno
+                    )
+                    LEFT OUTER JOIN turmasprofessores tp ON (
+                        ih.disciplina = tp.disciplina
+                        AND ih.curso_ficha = tp.curso
+                        AND ih.turma = tp.turma
+                    )
+                    INNER JOIN view_matricula_turma_principal vmp ON (
+                        mc.cd_matricula_curso = vmp.cd_matricula_curso
+                        AND mc.cd_pessoa = vmp.cd_pessoa
+                        AND mc.cd_curso = vmp.cd_curso
+                    )
+                    INNER JOIN turmas turmas_principal ON (
+                        vmp.turma = turmas_principal.codigo
+                        AND vmp.cd_curso = turmas_principal.curso
+                    )
+                    INNER JOIN grades_disciplinas grades_disc ON (
+                        disc.codigo = grades_disc.CD_DISCIPLINA
+                        AND tu.cd_grade = grades_disc.CD_GRADE
+                        AND tu.curso = grades_disc.CD_CURSO
+                    )
+                    INNER JOIN cursos_coligadas cl ON (cm.CD_CURSO = cl.CD_CURSO)
+                    LEFT OUTER JOIN professores prof ON (tp.professor = prof.CD_PESSOA)
+                    LEFT OUTER JOIN pessoas professor_pes ON (tp.professor = professor_pes.CD_PESSOA)
+                    LEFT OUTER JOIN professores_titulos pt ON (prof.CD_PESSOA = pt.cd_pessoa)
+                    LEFT OUTER JOIN pessoas_cadastro pc ON (ih.cd_pessoa = pc.cd_pessoa)
+                    LEFT OUTER JOIN instituicoes_ensino instituicoes_ensino_pessoa ON (
+                        pc.ds_conteudo = instituicoes_ensino_pessoa.nm_instituicao
+                    )
+                    LEFT JOIN certificado_livros livro ON (livro.cd_cert_livro = mc.cd_cert_livro)
+                WHERE
+                    1 = 1
+                    AND cm.nr_grau != 3
+                    /* Validacoes desativadas a pedido do chamado 212179
+
+                    AND GET_VALIDA_DISCIPLINAS_CH ( ih.cd_pessoa, mc.cd_curso ) = 1 
+                    AND GET_COUNT_DOC_ALUNOS ( ih.cd_pessoa, mc.cd_curso ) = ( SELECT COUNT( dn.cod_documento )
+                    FROM documentos_necessarios dn WHERE dn.curso = mc.cd_curso LIMIT 1 ) 
+                    AND 
+                    ( SELECT COUNT( m.cd_mensalidade ) FROM mensalidades m 
+                    WHERE m.codigoaluno = ih.cd_pessoa AND m.situacao <> 5 ) =
+                    ( SELECT COUNT( m.cd_mensalidade ) FROM mensalidades m 
+                    WHERE m.codigoaluno = ih.cd_pessoa AND m.situacao = 0 ) 
+                    */
+
+                     "" .
+                     ((!empty($arrParametros["":cd_coligada""]))
+                        ? ""AND cl.cd_coligada IN (:cd_coligada)""
+                        : NULL)
+                     . ""
+
+                     "" .
+                     ((!empty($arrParametros["":id_curso""]))
+                        ? ""AND cm.ID_CURSO IN (:id_curso)""
+                        : NULL)
+                     . ""
+
+                     "" .
+                     ((!empty($arrParametros["":cd_pessoa""]))
+                        ? ""AND mc.cd_pessoa IN (:cd_pessoa)""
+                        : NULL)
+                     . ""
+
+               GROUP BY
+                  grades_disc.CD_DISCIPLINA_CATEGORIA,
+                  disc.descricao
+				   
+
+               ORDER BY
+                     disc.descricao ASC
+
+         "")
+            // aplicacao de filtro a consulta
+            ->params(
+                $arrParametros
+            )
+            // tratamento dos dados do array, sendo feita a aplicacao de mascaras aos dados
+            // para simplificar e melhorar a apresentacao dos dados na visualizacao
+            ->pipe(
+                new ColumnMeta(
+                    array(
+                        ""cod_aluno"" => $arrFormatoInteiro,
+                        ""dt_nasc_aluno"" => $arrFormatoData,
+                        ""dt_conclusao"" => $arrFormatoData,
+                        ""dt_colacao"" => $arrFormatoData,
+                        ""dt_exp_diploma"" => $arrFormatoData,
+                        ""nr_cert_registro"" => $arrFormatoInteiro,
+                        ""cd_cert_livro"" => $arrFormatoInteiro,
+                        ""nr_cert_folha"" => $arrFormatoInteiro
+                    )
+                )
+            )
+            ->saveTo($consulta);
+
+        // criacao do primeiro dataStore para uso com o componente de tabela na visualizacao
+        $consulta
+            ->pipe($this->dataStore(""dados_consulta""));
+
+        $consulta
+            ->pipe(new Group(array(
+                ""by"" => array(
+                    ""grupo_1""
+                )
+            )))
+            ->pipe(new OnlyColumn(array(
+                ""grupo_1""
+            )))
+            ->pipe($this->dataStore(""dados_consulta_agrupado""));
+
+			require_once $this->path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'consulta_cabecalho.php'));
+    }
+}
+","<?php
+
+use \koolreport\widgets\koolphp\Table;
+use \koolreport\processes\Filter;
+use \koolreport\barcode\QRCode;
+
+// path pasta
+$path_include = join(DIRECTORY_SEPARATOR, array('..', '..', '..', 'projetos', 'relatorios', ''));
+
+// margens
+$ds_margem_superior = $this->arrDadosGerais->arrFormato->ds_margem_superior;
+$ds_margem_inferior = $this->arrDadosGerais->arrFormato->ds_margem_inferior;
+$ds_margem_esquerda = $this->arrDadosGerais->arrFormato->ds_margem_esquerda;
+$ds_margem_direita = $this->arrDadosGerais->arrFormato->ds_margem_direita;
+
+$sn_geracao = $_POST[""pdf""];
+
+?>
+
+<html>
+
+<head>
+    <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'dados_head.php')); ?>
+</head>
+
+<body class=""relatorio"">
+    <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'loader.php')); ?>
+    <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'barra_superior.php')); ?>
+    <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'css.php')); ?>
+    <?php require_once $path_include . join(DIRECTORY_SEPARATOR, array('imports_padroes', 'valida_consulta_registros_certificado.php')); ?>
+
+    <?php
+     if ($this->arrDadosGerais->arrOpcoes->tp_white->me_configuracao == 'não') { 
+    foreach ($this->dataStore(""dados_consulta_agrupado"") as $visualizacao) {
+        $dados_pagina = $this->dataStore(""dados_consulta"")
+            ->filter(
+                ""grupo_1"",
+                ""="",
+                $visualizacao[""grupo_1""]
+            );
+    ?>
+
+        <style>
+            @media screen {
+                .cert_image {
+                    background-image: url('https://sustentare.unimestre.com/arquivo/cliente/imagens/img-frente-certificado.jpg');
+                }
+            }
+
+            @page {
+                size: landscape;
+                margin: 0;
+            }
+
+            @media print {
+                .cert_image::before {
+                    position: absolute;
+                    left: 0.5;
+                    z-index: -1;
+                    content: url('https://sustentare.unimestre.com/arquivo/cliente/imagens/img-frente-certificado.jpg');
+                }
+            }
+
+            p {
+                margin: 0;
+            }
+
+            .text-cert {
+                text-align: center;
+                position: absolute;
+                margin-top: 260px;
+                margin-left: 270px;
+                font-size: 16px !important;
+            }
+
+            .font_style {
+                font-family: Times, ""Times New Roman"", Georgia, serif;
+            }
+        </style>
+
+        <div class=""container cert_image"">
+            <div class=""conteudo"" style=""
+                    padding-top: <?= (($sn_geracao) ? $ds_margem_superior : 0) . 'cm' ?>;
+                    margin-bottom: <?= (($sn_geracao) ? $ds_margem_inferior : 0) . 'cm' ?>;
+                    margin-left: <?= $ds_margem_esquerda . 'cm' ?>;
+                    margin-right: <?= $ds_margem_direita . 'cm' ?>;
+                "">
+                <div class=""text-cert font_style"">O Diretor Geral da Sustentare Escola de Negócios confere a:
+                    <p class=""font_style"" style=""font-size: 24px !important; text-align: center; font-weight: bold;""> <?php echo $dados_pagina[0]['nm_aluno'] ?></p>
+                    o presente certificado do curso de Pós-Graduação Lato Sensu, nível de Especialização, em:
+                    <p class=""font_style"" style=""font-size: 24px !important; text-align: center; font-weight: bold;""> <?php echo $dados_pagina[0]['ds_curso'] ?></p>
+                    realizado no período de <b><?php echo $dados_pagina[0]['t_dt_ini'] ?></b> a <b><?php echo $dados_pagina[0]['t_dt_fim'] ?></b>,
+                    com duração de <b><?php echo $dados_pagina[0]['ch_alu'] ?></b> horas/aula. <br><br>
+
+                    <img width=""165"" height=""95"" src=""https://i.imgur.com/9AmaE6X.jpg"" alt=""ass"" style=""display: block; margin-left: 200px;"">
+                   
+                    Wilmar Audye Cidral <br>
+                    Fundador, Diretor e Educador
+                </div>
+                <p class=""font_style"" style=""
+                    font-size: 16px !important;
+                    text-align: end;
+                    position: absolute;
+                    margin-top: 480px;
+                    margin-left: 800px;""> <?php echo $dados_pagina[0]['dt_impress'] . '.' ?> <br> <br> <br> <br>
+                    <img width=""90"" height=""90"" src=""https://api.qrserver.com/v1/create-qr-code/?data=https://sustentare.unimestre.com/projetos/unimestre/impressoes/download.php"" alt=""qrcode"">
+                </p>
+            </div>
+        </div>
+        <div class=""page-break"" style=""page-break-after: always;""></div>
+
+    <?php
+
+    }
+
+    foreach ($this->dataStore(""dados_consulta_agrupado"") as $visualizacao) {
+        $dados_pagina = $this->dataStore(""dados_consulta"")
+            ->filter(
+                ""grupo_1"",
+                ""="",
+                $visualizacao[""grupo_1""]
+            );
+
+    ?>
+
+        <style>
+            * {
+                font-family: 'Times New Roman', Times, serif;
+            }
+
+            @page {
+                size: landscape;
+                margin: 0;
+            }
+
+            @media screen {
+                .cert_atras {
+                    background-image: url('https://sustentare.unimestre.com/arquivo/cliente/imagens/img-verso-certificado.jpg');
+                    left: 0;
+                }
+            }
+
+            @media print {
+                .cert_atras::before {
+                    position: absolute;
+                    left: 0.5;
+                    content: url('https://sustentare.unimestre.com/arquivo/cliente/imagens/img-verso-certificado.jpg');
+                }
+            }
+
+            p {
+                margin: 0;
+            }
+
+            .text-cert-verso {
+                text-align: center;
+                position: absolute;
+                margin-top: 50px;
+                margin-left: 0;
+                font-size: 16px !important;
+                width: 100%;
+            }
+
+            .font {
+                font-size: 11px !important;
+            }
+
+            .font_minus {
+                font-size: 9px !important;
+            }
+            .style_borda_table {
+                border: 1px solid #4e4e4e !important;
+                padding: 0.1rem !important;
+            }
+        </style>
+
+        <div class=""container cert_atras"">
+
+            <div class=""conteudo"" style=""
+                    padding-top: <?= (($sn_geracao) ? $ds_margem_superior : 0) . 'cm' ?>;
+                    margin-bottom: <?= (($sn_geracao) ? $ds_margem_inferior : 0) . 'cm' ?>;
+                    margin-left: <?= $ds_margem_esquerda . 'cm' ?>;
+                    margin-right: <?= $ds_margem_direita . 'cm' ?>;
+                "">
+            </div>
+            <div class=""text-cert-verso"">
+                <table style=""height: 20px; width: 85%; margin-left: auto; margin-right: auto;"">
+                    <tbody>
+                        <tr style=""height: 18px;"">
+                            <td class=""style_borda_table font_minus"" style=""width: 70%; height: 18px;"">Alun<?php echo $dados_pagina[0]['a_o'] ?>: <span style=""font-weight: bold; font-size: 9px !important;""><?php echo $dados_pagina[0]['nm_aluno'] ?></span></td>
+                            <td class=""style_borda_table font_minus"" style=""width: 30%; height: 18px;"">CPF: <span style=""font-weight: bold; font-size: 9px !important;""> <?php echo $dados_pagina[0]['cpf'] ?> </span> </td>
+                        </tr>
+                        <tr style=""height: 18px;"">
+                            <td class=""style_borda_table font_minus"" style=""width: 70%; height: 36px;""> Curso: <span style=""font-weight: bold; font-size: 9px !important;""> <?php echo $dados_pagina[0]['ds_curso'] ?> </span> </td>
+                            <td class=""style_borda_table font_minus"" style=""width: 30%; height: 36px;"">Área de Conhecimento (CAPES/CNPQ): <span style=""font-weight: bold; font-size: 9px !important;""> <?php echo $dados_pagina[0]['c_area'] ?> </span> </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                     <table style=""height: 20px; width: 85%; margin-left: auto; margin-right: auto; margin-top: 10px; border-bottom: #FFF !important;"">
+                    <tbody>
+                        <tr>
+                            <td class=""style_borda_table font_minus"" style=""width: 40%; text-align: center; font-weight: bold;"">Módulo</td>
+                            <td class=""style_borda_table font_minus"" style=""text-align: center; font-weight: bold;"">Carga Horária<br>(hora/aula)</td>
+                            <td class=""style_borda_table font_minus"" style=""text-align: center; font-weight: bold;"">Frequência</td>
+                            <td class=""style_borda_table font_minus"" style=""text-align: center; font-weight: bold;"">Nota</td>
+                            <td class=""style_borda_table font_minus"" style=""text-align: center; font-weight: bold;"">Professor(a)</td>
+                        </tr>
+                        <?php foreach ($dados_pagina as $key => $dado) {
+                        ?>
+                            <tr>
+                                <td class=""style_borda_table font_minus"" style=""width: 40%; text-align: left;"">
+                                    <?php echo $dado['ds_disciplina'] ?>
+                                </td>
+                                <td class=""style_borda_table font_minus"" style=""width: 10%; text-align: center;"">
+                                    <?php echo $dado['nr_ch'] ?>
+                                </td>
+                                <td class=""style_borda_table font_minus"" style=""width: 10%; text-align: center;"">
+                                    <?php echo $dado['ds_freq'] . '%' ?>
+                                </td>
+                                <td class=""style_borda_table font_minus"" style=""width: 10%; text-align: center;"">
+                                    <?php echo $dado['ds_media'] ?>
+                                </td>
+                                <td class=""style_borda_table font_minus"" style=""width: 30%; text-align: left;"">
+                                    <?php echo $dado['prof_tit'] ?>
+                                </td>
+                            <?php
+                        }
+                            ?>
+                            </tr>
+
+                    </tbody>
+                </table>
+
+                  <table style=""height: 20px; width: 85%; margin-left: auto; margin-right: auto; border: 1px solid #4e4e4e !important; border-top: #FFF !important;"">
+                    <tbody>
+                        <tr>
+                            <td class=""font_minus"">Trabalho de Conclusão de Curso (TCC) ou Projeto Empresarial Aplicado (PEA):
+                                <b class=""font_minus"" style=""font-weight: bold;""><?php echo $dados_pagina[0]['tit_tcc'] ?></b>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                    
+                    <table style=""height: 20px; width: 85%; margin-left: auto; margin-right: auto; margin-top: 10px;"">
+                    <tbody>
+                        <tr>
+                            <td style=""text-align: left;"" class=""style_borda_table font_minus""> <br> Credenciamento da Sustentare Educacional Ltda, junto ao MEC, Portaria no. 190 (21 março 2022) publicada no Diário Oficial da União (D.O.U.) em 23 março 2022. <br><br>
+                                O presente curso cumpriu todas as disposições do Ministério da Educação (MEC), e resoluções da Câmara de Educação Superior (CES) e Conselho Nacional de Educação (CNE).
+                                <div style=""margin-top: 20px;""></div>
+                            </td>
+                            <td class=""style_borda_table font_minus"">
+                                <?php echo $dados_pagina[0]['reg_cert'] ?>
+                                <p style=""text-align: center; margin: 0;"">
+                                    <img width=""70"" height=""70"" src=""https://i.imgur.com/QUH9TD4.png"" alt=""ass"">
+                               
+                                <p style=""text-align: center;"">
+                                    Cinthia Rejane Ristow Cidral <br>
+                                    Diretora Acadêmica Administrativa
+                                </p>
+                                </p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <?php
+            }
+    } else {
+
+            foreach ($this->dataStore(""dados_consulta_agrupado"") as $visualizacao) {
+        $dados_pagina = $this->dataStore(""dados_consulta"")
+            ->filter(
+                ""grupo_1"",
+                ""="",
+                $visualizacao[""grupo_1""]
+            );
+        ?>
+
+        <style>
+            @media screen {
+                .cert_image {
+                    background-image: url('https://i.imgur.com/w9V97BI.png');
+                }
+            }
+
+            @page {
+                size: landscape;
+                margin: 0;
+            }
+
+            @media print {
+                .cert_image::before {
+                    position: absolute;
+                    left: 0.5;
+                    z-index: -1;
+                    content: url('https://i.imgur.com/w9V97BI.png');
+                }
+            }
+
+            p {
+                margin: 0;
+            }
+
+            .text-cert {
+                text-align: center;
+                position: absolute;
+                margin-top: 260px;
+                margin-left: 270px;
+                font-size: 16px !important;
+            }
+
+            .font_style {
+                font-family: Times, ""Times New Roman"", Georgia, serif;
+            }
+        </style>
+
+        <div class=""container cert_image"">
+            <div class=""conteudo"" style=""
+                    padding-top: <?= (($sn_geracao) ? $ds_margem_superior : 0) . 'cm' ?>;
+                    margin-bottom: <?= (($sn_geracao) ? $ds_margem_inferior : 0) . 'cm' ?>;
+                    margin-left: <?= $ds_margem_esquerda . 'cm' ?>;
+                    margin-right: <?= $ds_margem_direita . 'cm' ?>;
+                "">
+                <div class=""text-cert font_style"">O Diretor Geral da Sustentare Escola de Negócios confere a:
+                    <p class=""font_style"" style=""font-size: 24px !important; text-align: center; font-weight: bold;""> <?php echo $dados_pagina[0]['nm_aluno'] ?></p>
+                    o presente certificado do curso de Pós-Graduação Lato Sensu, nível de Especialização, em:
+                    <p class=""font_style"" style=""font-size: 24px !important; text-align: center; font-weight: bold;""> <?php echo $dados_pagina[0]['ds_curso'] ?></p>
+                    realizado no período de <b><?php echo $dados_pagina[0]['t_dt_ini'] ?></b> a <b><?php echo $dados_pagina[0]['t_dt_fim'] ?></b>,
+                    com duração de <b><?php echo $dados_pagina[0]['ch_alu'] ?></b> horas/aula. <br><br><br><br>
+                    <p>
+
+                    <img width=""165"" height=""95"" src=""https://i.imgur.com/9AmaE6X.jpg"" alt=""ass"" style=""display: block; margin-left: 200px;"">
+
+                    Wilmar Audye Cidral <br>
+                    Fundador, Diretor e Educador
+                    </p>
+                </div>
+                <p class=""font_style"" style=""
+                    font-size: 16px !important;
+                    text-align: end;
+                    position: absolute;
+                    margin-top: 480px;
+                    margin-left: 800px;""> <?php echo $dados_pagina[0]['dt_impress'].'.' ?> <br> <br> <br> <br>
+                    <img width=""90"" height=""90"" src=""https://api.qrserver.com/v1/create-qr-code/?data=https://sustentare.unimestre.com/projetos/unimestre/impressoes/download.php"" alt=""qrcode"">
+                </p>
+            </div>
+        </div>
+        <div class=""page-break"" style=""page-break-after: always;""></div>
+
+    <?php
+
+    }
+
+    foreach ($this->dataStore(""dados_consulta_agrupado"") as $visualizacao) {
+        $dados_pagina = $this->dataStore(""dados_consulta"")
+            ->filter(
+                ""grupo_1"",
+                ""="",
+                $visualizacao[""grupo_1""]
+            );
+
+        ?>
+
+        <style>
+            * {
+                font-family: 'Times New Roman', Times, serif;
+            }
+
+            @page {
+                size: landscape;
+                margin: 0;
+            }
+
+            @media screen {
+                .cert_atras {
+                    background-image: url('https://i.imgur.com/w9V97BI.png');
+                    left: 0;
+                }
+            }
+
+            @media print {
+                .cert_atras::before {
+                    position: absolute;
+                    left: 0.5;
+                    content: url('https://i.imgur.com/w9V97BI.png');
+                }
+            }
+
+            p {
+                margin: 0;
+            }
+
+            .text-cert-verso {
+                text-align: center;
+                position: absolute;
+                margin-top: 50px;
+                margin-left: 0;
+                font-size: 16px !important;
+                width: 100%;
+            }
+
+            .font {
+                font-size: 11px !important;
+            }
+
+            .font_minus {
+                font-size: 9px !important;
+            }
+            .style_borda_table {
+                border: 1px solid #4e4e4e !important;
+                padding: 0.1rem !important;
+            }
+        </style>
+
+        <div class=""container cert_atras"">
+
+            <div class=""conteudo"" style=""
+                    padding-top: <?= (($sn_geracao) ? $ds_margem_superior : 0) . 'cm' ?>;
+                    margin-bottom: <?= (($sn_geracao) ? $ds_margem_inferior : 0) . 'cm' ?>;
+                    margin-left: <?= $ds_margem_esquerda . 'cm' ?>;
+                    margin-right: <?= $ds_margem_direita . 'cm' ?>;
+                "">
+            </div>
+            <div class=""text-cert-verso"">
+                <table style=""height: 20px; width: 85%; margin-left: auto; margin-right: auto;"">
+                    <tbody>
+                        <tr style=""height: 18px;"">
+                            <td class=""style_borda_table font_minus"" style=""width: 70%; height: 18px;"">Alun<?php echo $dados_pagina[0]['a_o'] ?>: <span style=""font-weight: bold; font-size: 9px !important;""><?php echo $dados_pagina[0]['nm_aluno'] ?></span></td>
+                            <td class=""style_borda_table font_minus"" style=""width: 30%; height: 18px;"">CPF: <span style=""font-weight: bold; font-size: 9px !important;""> <?php echo $dados_pagina[0]['cpf'] ?> </span> </td>
+                        </tr>
+                        <tr style=""height: 18px;"">
+                            <td class=""style_borda_table font_minus"" style=""width: 70%; height: 36px;""> Curso: <span style=""font-weight: bold; font-size: 9px !important;""> <?php echo $dados_pagina[0]['ds_curso'] ?> </span> </td>
+                            <td class=""style_borda_table font_minus"" style=""width: 30%; height: 36px;"">Área de Conhecimento (CAPES/CNPQ): <span style=""font-weight: bold; font-size: 9px !important;""> <?php echo $dados_pagina[0]['c_area'] ?> </span> </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                     <table style=""height: 20px; width: 85%; margin-left: auto; margin-right: auto; margin-top: 10px; border-bottom: #FFF !important;"">
+                    <tbody>
+                        <tr>
+                            <td class=""style_borda_table font_minus"" style=""width: 40%; text-align: center; font-weight: bold;"">Módulo</td>
+                            <td class=""style_borda_table font_minus"" style=""text-align: center; font-weight: bold;"">Carga Horária<br>(hora/aula)</td>
+                            <td class=""style_borda_table font_minus"" style=""text-align: center; font-weight: bold;"">Frequência</td>
+                            <td class=""style_borda_table font_minus"" style=""text-align: center; font-weight: bold;"">Nota</td>
+                            <td class=""style_borda_table font_minus"" style=""text-align: center; font-weight: bold;"">Professor(a)</td>
+                        </tr>
+                        <?php foreach ($dados_pagina as $key => $dado) {
+                        ?>
+                            <tr>
+                                <td class=""style_borda_table font_minus"" style=""width: 40%; text-align: left;"">
+                                    <?php echo $dado['ds_disciplina'] ?>
+                                </td>
+                                <td class=""style_borda_table font_minus"" style=""width: 10%; text-align: center;"">
+                                    <?php echo $dado['nr_ch'] ?>
+                                </td>
+                                <td class=""style_borda_table font_minus"" style=""width: 10%; text-align: center;"">
+                                    <?php echo $dado['ds_freq'] . '%' ?>
+                                </td>
+                                <td class=""style_borda_table font_minus"" style=""width: 10%; text-align: center;"">
+                                    <?php echo $dado['ds_media'] ?>
+                                </td>
+                                <td class=""style_borda_table font_minus"" style=""width: 30%; text-align: left;"">
+                                    <?php echo $dado['prof_tit'] ?>
+                                </td>
+                            <?php
+                                 }
+
+                            ?>
+                            </tr>
+
+                    </tbody>
+                </table>
+
+                  <table style=""height: 20px; width: 85%; margin-left: auto; margin-right: auto; border: 1px solid #4e4e4e !important; border-top: #FFF !important;"">
+                    <tbody>
+                        <tr>
+                            <td class=""font_minus"">Trabalho de Conclusão de Curso (TCC) ou Projeto Empresarial Aplicado (PEA):
+                                <b class=""font_minus"" style=""font-weight: bold;""><?php echo $dados_pagina[0]['tit_tcc'] ?></b>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                    
+                    <table style=""height: 20px; width: 85%; margin-left: auto; margin-right: auto; margin-top: 10px;"">
+                    <tbody>
+                        <tr>
+                            <td style=""text-align: left;"" class=""style_borda_table font_minus""> <br> Credenciamento da Sustentare Educacional Ltda, junto ao MEC, Portaria no. 190 (21 março 2022) publicada no Diário Oficial da União (D.O.U.) em 23 março 2022.<br><br>
+                                O presente curso cumpriu todas as disposições do Ministério da Educação (MEC), e resoluções da Câmara de Educação Superior (CES) e Conselho Nacional de Educação (CNE).
+                                <div style=""margin-top: 20px;""></div>
+                            </td>
+                            <td class=""style_borda_table font_minus"">
+                                <?php echo $dados_pagina[0]['reg_cert'] ?>
+
+                                <p style=""text-align: center; margin: 0; margin-top: 50px;"">
+                                 <img width=""70"" height=""70"" src=""https://i.imgur.com/QUH9TD4.png"" alt=""ass"">
+                      
+                                <p style=""text-align: center;"">
+                                    Cinthia Rejane Ristow Cidral <br>
+                                    Diretora Acadêmica Administrativa
+                                </p>
+                                </p>
+
+                                </p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <?php
+
+            } //fim do foreach
+                 } //fim do if
+            ?>
+</body>
+
+</html>","<?php
+
+require_once ""Relatorio.php"";
+
+$relatorio = new Relatorio;
+	
+$relatorio->run()->render();
+	","[
+   {
+      ""tipo"": ""uni-select-coligada-filha"",
+      ""obrigatorio"": false,
+      ""label"": ""Unidade"",
+      ""ds_campo"": ""cd_coligada""
+   },
+
+   {
+      ""tipo"": ""uni-select-curso"",
+      ""obrigatorio"": true,
+      ""label"": ""Curso"",
+      ""ds_campo"": ""id_curso""
+   },
+
+   {
+      ""tipo"": ""uni-busca-pessoa"",
+      ""obrigatorio"": true,
+      ""label"": ""Aluno"",
+      ""ds_campo"": ""cd_pessoa""
+   }
+]",73,"INSERT IGNORE INTO rgo_opcoes_tipos (
+								cd_opcao_tipo,
+								ds_opcao_tipo,
+								ds_tag_opcao,
+								dt_base
+						)
+				VALUES (
+								NULL,""Exibe em Branco"",""tp_white"",""2023-10-18 10:08:20"")","INSERT IGNORE INTO rgo_relatorios (
+		cd_relatorio,
+		cd_tipo,
+		cd_agrupamento,
+		sn_ativo,
+		nm_relatorio,
+		sn_padrao,
+		ds_filtro,
+		nm_arquivo,
+		me_relatorio_index,
+		me_relatorio_config,
+		me_relatorio_view,
+		cd_relatorio_template,
+		cd_formato,
+		me_documentacao_padrao,
+		me_documentacao_cliente,
+		ds_chave,
+		dt_base,
+		sn_autentique,
+		ds_autentique_config
+    )
+		VALUES (
+		NULL,
+		3,6,1,""Certificado de Conclusão de Pós Graduação	"",0,
+		NULL,
+		NULL,
+		NULL,
+		NULL,
+		NULL,
+		 NULL,2,""Um diploma é um título, um certificado ou uma credencial que emite uma entidade ou uma corporação para acreditar algo (um grau académico, um prémio, etc.)."", NULL,"""",""2024-04-26 09:11:39"",0, NULL)","INSERT IGNORE INTO rgo_opcoes (cd_opcao, cd_relatorio,cd_opcao_tipo,sn_padrao,sn_ativo,ds_opcao,me_configuracao,ds_chave,dt_base)
+VALUES (NULL,NULL,NULL,1,1,""Não"",""não"",""rel_cert_pos"",""2023-10-18 10:11:59""
+ ); 
+INSERT IGNORE INTO rgo_opcoes (cd_opcao, cd_relatorio,cd_opcao_tipo,sn_padrao,sn_ativo,ds_opcao,me_configuracao,ds_chave,dt_base)
+VALUES (NULL,NULL,NULL,0,1,""Sim"",""sim"",""rel_cert_pos_"",""2023-10-18 10:10:48""
+ )",,420.0,350,Escola de Negócios Sustentare,"Sustentare, Escola de Negócios",Escola de Negócios Sustentare
