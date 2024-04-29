@@ -19,7 +19,7 @@ for tabela in lista_raiz:
         arquivo_csv = csv.reader(arquivo, delimiter=",")
 
         def substituir_caracteres_especiais(caminho):
-            return re.sub(r'[<>:"/\\|?*]', '_', caminho)
+            return re.sub(r'[<>:"/\\|?*]', '_', caminho).strip()
 
         def criar_pasta_navegar(nome):
             os.mkdir(nome)
@@ -51,7 +51,7 @@ for tabela in lista_raiz:
                     documento.write(texto)
                     documento.close()
                 
-            indices_desconsiderados = [0, 1, 6]
+            indices_desconsiderados = [0, 1, 6, 11, 12, 13, 14, 15]
             for index, coluna in enumerate(linha):
                 if index not in indices_desconsiderados:
                     if coluna == '':
