@@ -12,9 +12,14 @@ def substituir_caracteres_especiais(caminho):
 raiz = os.chdir('.')
 csv_files = os.listdir(raiz)
 for csv_file in csv_files:
-    if csv_file == 'script.py' or csv_file == '.git' or csv_file == 'NOVA_QUERY.sql' or len(csv_file) <= 40  :
+    if csv_file == 'script.py' or csv_file == '.git' or csv_file == 'NOVA_QUERY.sql' or len(csv_file) <= 40:
         continue
-    os.rename(csv_file, csv_file[0:40] + '.csv', )
+    elif 40 < len(csv_file) < 43:
+        os.rename(csv_file, csv_file[0:30] + '.csv')
+        continue
+    os.rename(csv_file, csv_file[0:40] + '.csv' )
+
+# arquivo.csv
 
 csv_files_formatados = os.listdir(raiz)
 
