@@ -1,9 +1,10 @@
-SET SESSION group_concat_max_len = 5000;
+
+SET SESSION group_concat_max_len = 10000;
 
 SELECT
-	agrup.ds_agrupamento,
+	CONCAT(pai_agrup.ds_agrupamento, ' - ' ,agrup.ds_agrupamento),
 
-	rel.nm_relatorio,-- 	arquivos da rgo_relatorios à serem criados :
+	CONCAT(rel.cd_relatorio , ' - ', rel.nm_relatorio),-- 	arquivos da rgo_relatorios à serem criados :
 	rel.me_relatorio_config,
 	rel.me_relatorio_view,
 	rel.me_relatorio_index,
@@ -101,15 +102,28 @@ VALUES (NULL,NULL,NULL,",IFNULL( opc.sn_padrao, 'NULL' ),',',IFNULL( opc.sn_ativ
 FROM rgo_opcoes opc 	WHERE		opc.cd_relatorio = rel.cd_relatorio 	) AS opcoes_impressao,
 
 	IF( rel.cd_tipo = 2, 
-		(SELECT opc.me_configuracao FROM rgo_opcoes opc WHERE rel.cd_relatorio = opc.cd_relatorio ), NULL
-	) AS me_config
+		(SELECT GROUP_CONCAT(opc.me_configuracao SEPARATOR '; \n' ) FROM rgo_opcoes opc WHERE rel.cd_relatorio = opc.cd_relatorio ), NULL
+	) AS me_config,
+    
+        LENGTH((SELECT GROUP_CONCAT( 
+"INSERT IGNORE INTO rgo_opcoes (cd_opcao, cd_relatorio,cd_opcao_tipo,sn_padrao,sn_ativo,ds_opcao,me_configuracao,ds_chave,dt_base)
+VALUES (NULL,NULL,NULL,",IFNULL( opc.sn_padrao, 'NULL' ),',',IFNULL( opc.sn_ativo, 'NULL' ),',',IF( opc.ds_opcao IS NOT NULL, CONCAT('"', opc.ds_opcao, '"'), 'NULL' ),',',IF( opc.me_configuracao IS NOT NULL, CONCAT('"', opc.me_configuracao, '"') ,'NULL' ),',',IF( opc.ds_chave IS NOT NULL, CONCAT('"', opc.ds_chave ,'"') ,'NULL' ),',',IF( opc.dt_base IS NOT NULL, CONCAT('"' , dt_base , '"'), 'NULL' ),'\n )' SEPARATOR '; \n' 	)	
+FROM rgo_opcoes opc 	WHERE		opc.cd_relatorio = rel.cd_relatorio	)) AS LENGHT_opcoes_impressao/*,
+    
+    {} as 'cd_unicontrole',
+    '{}' as 'nome',
+    '{}' as 'apelido',
+    '' as 'nome_tratado'*/
 
 FROM
 	rgo_relatorios rel
 	INNER JOIN rgo_agrupamentos agrup ON ( agrup.cd_agrupamento = rel.cd_agrupamento ) 
+	INNER JOIN rgo_agrupamentos pai_agrup ON (agrup.cd_agrupamento_pai = pai_agrup.cd_agrupamento)
 	
 WHERE
 	me_relatorio_index IS NOT NULL 
 	AND me_relatorio_index != '' 
 	AND sn_ativo = 1 
-	AND (rel.nm_arquivo IS NULL OR rel.nm_arquivo != '')
+	AND (rel.nm_arquivo IS NULL OR rel.nm_arquivo = '')
+	
+ORDER BY 1,2
