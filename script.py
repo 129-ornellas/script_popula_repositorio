@@ -3,6 +3,8 @@ import csv
 import shutil
 import re
 
+csv.field_size_limit(2147483647)
+
 raiz = os.chdir('.')
 lista_raiz = os.listdir(raiz)
 for tabela in lista_raiz:
@@ -16,6 +18,7 @@ for tabela in lista_raiz:
 
     arquivo_csv = tabela
     with open(arquivo_csv, "r", encoding="utf8") as arquivo:
+
         arquivo_csv = csv.reader(arquivo, delimiter=",")
 
         def substituir_caracteres_especiais(caminho):
