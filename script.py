@@ -18,20 +18,19 @@ for csv_file in csv_files:
 
 csv_files_formatados = os.listdir(raiz)
 
-for tabela in csv_files_formatados:
-    if tabela == 'script.py' or tabela == '.git' or tabela == 'NOVA_QUERY.sql':
+for arquivo_csv in csv_files_formatados:
+    if arquivo_csv == 'script.py' or arquivo_csv == '.git' or arquivo_csv == 'NOVA_QUERY.sql':
         continue
 
-    tabela = substituir_caracteres_especiais(tabela)
-    novo_path = tabela.replace('.csv', '')
+    arquivo_csv = substituir_caracteres_especiais(arquivo_csv)
+    novo_path = arquivo_csv.replace('.csv', '')
 
     if( not os.path.exists(novo_path)):        
         novo_path = substituir_caracteres_especiais(novo_path)
         os.mkdir(novo_path)
-        shutil.copy(tabela, novo_path)
+        shutil.copy(arquivo_csv, novo_path)
         os.chdir(novo_path)
 
-    arquivo_csv = tabela
     with open(arquivo_csv, "r", encoding="utf8") as arquivo:
 
         arquivo_csv = csv.reader(arquivo, delimiter=",")
