@@ -5,13 +5,28 @@ import re
 
 csv.field_size_limit(2147483647)
 
+
+def substituir_caracteres_especiais(caminho): 
+    return re.sub(r'[<>:"/\\|?*]', '_', caminho).strip()
+
 raiz = os.chdir('.')
-lista_raiz = os.listdir(raiz)
-for tabela in lista_raiz:
+csv_files = os.listdir(raiz)
+for csv_file in csv_files:
+    if csv_file == 'script.py' or csv_file == '.git' or csv_file == 'NOVA_QUERY.sql' or len(csv_file) <= 40  :
+        continue
+    os.rename(csv_file, csv_file[0:40] + '.csv', )
+
+csv_files_formatados = os.listdir(raiz)
+
+for tabela in csv_files_formatados:
     if tabela == 'script.py' or tabela == '.git' or tabela == 'NOVA_QUERY.sql':
         continue
+
+    tabela = substituir_caracteres_especiais(tabela)
     novo_path = tabela.replace('.csv', '')
-    if( not os.path.exists(novo_path)):
+
+    if( not os.path.exists(novo_path)):        
+        novo_path = substituir_caracteres_especiais(novo_path)
         os.mkdir(novo_path)
         shutil.copy(tabela, novo_path)
         os.chdir(novo_path)
@@ -20,9 +35,6 @@ for tabela in lista_raiz:
     with open(arquivo_csv, "r", encoding="utf8") as arquivo:
 
         arquivo_csv = csv.reader(arquivo, delimiter=",")
-
-        def substituir_caracteres_especiais(caminho):
-            return re.sub(r'[<>:"/\\|?*]', '_', caminho).strip()
 
         def criar_pasta_navegar(nome):
             os.mkdir(nome)
@@ -40,7 +52,6 @@ for tabela in lista_raiz:
                 os.chdir(agrupamento)
             
             relatorio = substituir_caracteres_especiais(f"{linha[1]}")
-            # relatorio_formatado = "" .join(filter(str.isalnum, relatorio))
             
             if(not os.path.exists(relatorio)):
                 criar_pasta_navegar(relatorio)
