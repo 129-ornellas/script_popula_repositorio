@@ -3,6 +3,8 @@ import csv
 import shutil
 import re
 
+
+# comentário teste na main pra ver se funciona apagar e criar branch
 csv.field_size_limit(2147483647)
 
 
